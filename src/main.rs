@@ -30,7 +30,6 @@ async fn login(State(state): State<Arc<AuthrState>>) -> impl IntoResponse {
         .set_pkce_challenge(pkce_challenge)
         .url();
 
-    // state.sessions.lock().unwrap().insert(csrf_token.into_secret(), pkce_verifier);
     match state.sessions.lock() {
         Ok(mut sessions) => {
             sessions.insert(csrf_token.into_secret(), pkce_verifier);
@@ -48,7 +47,7 @@ async fn callback(Query(params): Query<HashMap<String, String>>, State(state): S
     let token = match csrf_token_header {
         Some(token) => token,
         None => {
-            return (StatusCode::FORBIDDEN, "Not Authorized").into_response();
+            return not_authorized().into_response();
         },
     };
 
@@ -56,7 +55,7 @@ async fn callback(Query(params): Query<HashMap<String, String>>, State(state): S
     let code = match code_header {
         Some(code) => code.to_string(),
         None => {
-            return (StatusCode::FORBIDDEN, "Not Authorized").into_response();
+            return not_authorized().into_response();
         },
     };
 
@@ -72,7 +71,7 @@ async fn callback(Query(params): Query<HashMap<String, String>>, State(state): S
     let pkce_verifier = match pkce_verifier {
         Some(verifier) => verifier,
         None => {
-            return (StatusCode::FORBIDDEN, "Not Authorized").into_response();
+            return not_authorized().into_response();
         },
     };
 
@@ -145,9 +144,18 @@ type SetClient<
     HasTokenUrl,
 >;
 
-#[tokio::main]
-async fn main() {
-    let sessions = Mutex::new(HashMap::<String, PkceCodeVerifier>::new());
+async fn handle_not_found() -> (StatusCode, &'static str) {
+    not_found()
+}
+
+fn not_found() -> (StatusCode, &'static str) {
+    (StatusCode::NOT_FOUND, "Not Found")
+}
+fn not_authorized() -> (StatusCode, &'static str) {
+    (StatusCode::FORBIDDEN, "Not Authorized")
+}
+
+fn get_client() -> SetClient {
     let client_id = env::var("GOOGLE_OAUTH_CLIENT_ID").expect("client id");
     let client_secret = env::var("GOOGLE_OAUTH_CLIENT_SECRET").expect("client secret");
     let auth_uri = AuthUrl::new("https://accounts.google.com/o/oauth2/v2/auth".to_string()).expect("auth_uri");
@@ -155,26 +163,28 @@ async fn main() {
     let redirect_uri = RedirectUrl::new("http://localhost:8080/auth/google/callback".to_string())
         .expect("redirect_uri");
 
-    let client = BasicClient::new(ClientId::new(client_id))
+    BasicClient::new(ClientId::new(client_id))
         .set_client_secret(ClientSecret::new(client_secret))
         .set_auth_uri(auth_uri)
         .set_token_uri(token_uri)
-        .set_redirect_uri(redirect_uri);
+        .set_redirect_uri(redirect_uri)
+}
+
+#[tokio::main]
+async fn main() {
+    let sessions = Mutex::new(HashMap::<String, PkceCodeVerifier>::new());
+    let client = get_client();
     let state = AuthrState {
         sessions,
         client,
     };
-
-    async fn handle_404() -> (StatusCode, &'static str) {
-        (StatusCode::NOT_FOUND, "Not Found")
-    }
 
     let state = Arc::new(state);
     let app = Router::new()
         .route("/auth/google/login", get(login))
         .route("/auth/google/callback", get(callback))
         .with_state(state)
-        .fallback_service(ServeDir::new("static").not_found_service(handle_404.into_service()));
+        .fallback_service(ServeDir::new("static").not_found_service(handle_not_found.into_service()));
 
     let address = "0.0.0.0:8080".to_string();
     let listener = TcpListener::bind(address)
