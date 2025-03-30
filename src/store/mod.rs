@@ -1,6 +1,6 @@
 use crate::types::DataObject;
 
-trait Store<T> {
+pub(crate) trait Store<T> {
     fn get(&self, id: i64) -> Option<&T>
     where
         T: DataObject;
@@ -14,11 +14,24 @@ trait Store<T> {
 
 // in memory storage
 use std::collections::HashMap;
+
+#[derive(Debug)]
 pub struct MemStore<T>
 where
     T: DataObject,
 {
     mem: HashMap<i64, T>,
+}
+
+impl<T> MemStore<T>
+where
+    T: DataObject
+{
+    pub fn new() -> Self {
+        Self {
+            mem: HashMap::<i64, T>::new()
+        }
+    }
 }
 
 impl<T: DataObject> Store<T> for MemStore<T> {

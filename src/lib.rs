@@ -2,39 +2,40 @@
 pub mod auth;
 pub mod config;
 pub mod error;
-mod store;
 pub mod types;
+mod store;
 
 // internal imports
+pub use crate::store::MemStore;
+use crate::store::Store;
 use crate::auth::google_auth::GoogleAuthClient;
 use crate::error::AuthrError;
+use crate::types::{User, DataType};
 
 // imports
 use axum::{
-    Router,
-    extract::{Path, State},
-    handler::HandlerWithoutStateExt,
-    http::StatusCode,
-    response::IntoResponse,
-    routing::get,
+    extract::{Path, State}, handler::HandlerWithoutStateExt, http::StatusCode, response::IntoResponse, routing::{get, post}, Router
 };
 use oauth2::PkceCodeVerifier;
 use std::{collections::HashMap, sync::Arc, sync::Mutex};
 use tokio::net::TcpListener;
 use tower_http::services::ServeDir;
+use axum::Json;
 
 // state type
 #[derive(Debug)]
 pub struct AuthrState {
     sessions: Mutex<HashMap<String, PkceCodeVerifier>>,
     client: GoogleAuthClient,
+    store: Mutex<MemStore<User>>,
 }
 
 impl AuthrState {
-    pub fn new(client: GoogleAuthClient) -> Self {
+    pub fn new(client: GoogleAuthClient, store: Mutex<MemStore<User>>) -> Self {
         Self {
             sessions: Mutex::new(HashMap::<String, PkceCodeVerifier>::new()),
             client,
+            store,
         }
     }
 }
@@ -45,15 +46,48 @@ async fn handle_not_found() -> impl IntoResponse {
 }
 
 async fn data_get(
-    Path((data_type, id)): Path<(String, i64)>,
-    State(_): State<Arc<AuthrState>>,
+    Path((_data_type, id)): Path<(String, i64)>,
+    State(state): State<Arc<AuthrState>>,
 ) -> impl IntoResponse {
-    (StatusCode::OK, format!("{} {}", data_type, id)).into_response()
+    match state.store.lock() {
+        Ok(store) => {
+            match store.get(id) {
+                Some(data) => Json(data).into_response(),
+                None => AuthrError::NotFound.into_response(),
+            }
+        },
+        Err(_) => {
+            (StatusCode::INTERNAL_SERVER_ERROR, "could not get data from store").into_response()
+        },
+    }
+}
+
+async fn data_create(
+    Path(data_type): Path<DataType>,
+    State(state): State<Arc<AuthrState>>,
+    Json(payload): Json<User>,
+) -> impl IntoResponse {
+    match data_type {
+        DataType::User => {
+            match state.store.lock() {
+                Ok(mut store) => {
+                    match store.create(payload) {
+                        Ok(data) => Json(data.clone()).into_response(),
+                        Err(_) => AuthrError::NotFound.into_response(),
+                    }
+                },
+                Err(_) => {
+                    (StatusCode::INTERNAL_SERVER_ERROR, "could not get data from store").into_response()
+                }
+            }
+        },
+    }
 }
 
 fn data_routes(state: Arc<AuthrState>) -> Router {
     Router::new()
         .route("/{type}/{id}", get(data_get))
+        .route("/{type}", post(data_create))
         .with_state(state)
 }
 

@@ -1,11 +1,13 @@
 use tokio::net::TcpListener;
+use std::sync::Mutex;
 
-use authrs::{AuthrState, auth::google_auth::GoogleAuthClient, run};
+use authrs::{auth::google_auth::GoogleAuthClient, run, types::User, AuthrState, MemStore};
 
 #[tokio::main]
 async fn main() {
     let client = GoogleAuthClient::from_env();
-    let state = AuthrState::new(client);
+    let mem_store = Mutex::new(MemStore::<User>::new());
+    let state = AuthrState::new(client, mem_store);
     /*
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::from_default_env())
