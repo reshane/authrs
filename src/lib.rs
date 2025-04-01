@@ -43,7 +43,7 @@ impl AuthrState {
 
 // helper functions
 async fn handle_not_found() -> impl IntoResponse {
-    AuthrError::NotAuthorized.into_response()
+    AuthrError::NotFound.into_response()
 }
 
 async fn data_get(

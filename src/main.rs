@@ -8,6 +8,7 @@ async fn main() {
     let client = GoogleAuthClient::from_env();
     let mem_store = Mutex::new(MemStore::new());
     let state = AuthrState::new(client, mem_store);
+
     /*
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::from_default_env())
