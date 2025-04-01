@@ -28,11 +28,11 @@ use axum::routing::delete;
 pub struct AuthrState {
     sessions: Mutex<HashMap<String, PkceCodeVerifier>>,
     client: GoogleAuthClient,
-    store: Mutex<MemStore<User>>,
+    store: Mutex<MemStore>,
 }
 
 impl AuthrState {
-    pub fn new(client: GoogleAuthClient, store: Mutex<MemStore<User>>) -> Self {
+    pub fn new(client: GoogleAuthClient, store: Mutex<MemStore>) -> Self {
         Self {
             sessions: Mutex::new(HashMap::<String, PkceCodeVerifier>::new()),
             client,
@@ -47,13 +47,19 @@ async fn handle_not_found() -> impl IntoResponse {
 }
 
 async fn data_get(
-    Path((_data_type, id)): Path<(String, i64)>,
+    Path((data_type, id)): Path<(DataType, i64)>,
     State(state): State<Arc<AuthrState>>,
 ) -> impl IntoResponse {
     match state.store.lock() {
         Ok(store) => {
-            match store.get(id) {
-                Some(data) => Json(data).into_response(),
+            match store.get(id, data_type) {
+                Some(data) => {
+                    let downcasted = data.as_any().downcast_ref::<User>();
+                    if let Some(ins_data) = downcasted {
+                        return Json(ins_data.clone()).into_response()
+                    }
+                    AuthrError::NotFound.into_response()
+                },
                 None => AuthrError::NotFound.into_response(),
             }
         },
@@ -64,14 +70,20 @@ async fn data_get(
 }
 
 async fn data_delete(
-    Path((_data_type, id)): Path<(String, i64)>,
+    Path((data_type, id)): Path<(DataType, i64)>,
     State(state): State<Arc<AuthrState>>,
 ) -> impl IntoResponse {
     match state.store.lock() {
         Ok(mut store) => {
-            match store.delete(id) {
-                Some(data) => Json(data).into_response(),
-                None => AuthrError::NotFound.into_response(),
+            match store.delete(id, data_type) {
+                Ok(data) => {
+                    let downcasted = data.as_any().downcast_ref::<User>();
+                    if let Some(ins_data) = downcasted {
+                        return Json(ins_data.clone()).into_response()
+                    }
+                    AuthrError::NotFound.into_response()
+                },
+                Err(_) => AuthrError::NotFound.into_response(),
             }
         },
         Err(_) => {
@@ -89,8 +101,14 @@ async fn data_create(
         DataType::User => {
             match state.store.lock() {
                 Ok(mut store) => {
-                    match store.create(payload) {
-                        Ok(data) => Json(data.clone()).into_response(),
+                    match store.create(&payload) {
+                        Ok(data) => {
+                            let downcasted = data.as_any().downcast_ref::<User>();
+                            if let Some(ins_data) = downcasted {
+                                return Json(ins_data.clone()).into_response()
+                            }
+                            AuthrError::NotFound.into_response()
+                        },
                         Err(_) => AuthrError::NotFound.into_response(),
                     }
                 },

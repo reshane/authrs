@@ -1,4 +1,4 @@
-use super::DataObject;
+use super::{DataObject, DataType};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -12,5 +12,13 @@ pub struct User {
 impl DataObject for User {
     fn id(&self) -> i64 {
         self.id
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn data_type(&self) -> super::DataType {
+        DataType::User
     }
 }
