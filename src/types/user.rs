@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 
-use crate::{
-    store::{error::{StoreError, StoreResult}, PsqlStore, Storeable}
+use crate::store::{
+    error::{StoreError, StoreResult}, PsqlStore, Storeable
 };
 
 use super::DataObject;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
-use tracing::error;
+use tracing::{error, debug};
 
 #[derive(FromRow, Debug, Clone, Deserialize, Serialize)]
 pub struct User {
@@ -35,8 +35,29 @@ impl Storeable<PsqlStore, User> for User {
         }
     }
 
-    async fn get_queries(_queries: &HashMap<String, String>, store: &PsqlStore) -> Vec<User> {
-        let users = sqlx::query_as::<_, User>("select * from users")
+    async fn get_queries(queries: &HashMap<String, String>, store: &PsqlStore) -> Vec<User> {
+        let mut clauses = vec![];
+        let mut values = vec![];
+        for (i, (k, v)) in queries.iter().enumerate() {
+            debug!("{} = ${} ({})", k, i+1, v);
+            clauses.push(format!("({} = ${})", k, i+1));
+            values.push(v);
+        }
+        let sql = if clauses.len() == 0 {
+            "select * from users".to_string()
+        } else {
+            format!("select * from users where {}", clauses.join(" and "))
+        };
+
+        debug!("{}", sql);
+
+        let mut query = sqlx::query_as::<_, User>(sql.as_str());
+
+        for v in values.into_iter() {
+            query = query.bind(v);
+        }
+
+        let users = query
             .fetch_all(&store.pool)
             .await;
         match users {

@@ -23,7 +23,7 @@ use std::env;
 
 use crate::{AuthrState, Storeable, error::AuthrError, types::User};
 use serde::{Deserialize, Serialize};
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 // there has to be a way to get rid of this
 // type SetClient<
@@ -205,14 +205,31 @@ pub async fn callback(
     };
 
     let user = User::from(user_info);
-    match user.create(state.store.clone().as_ref()).await {
-        Ok(user) => {
-            info!("{:?}", user);
+    let mut guid_query = HashMap::new();
+    guid_query.insert("guid".to_string(), user.guid.clone());
+    let mut retrieved = User::get_queries(&guid_query, state.store.clone().as_ref()).await;
+    let retrieved = match retrieved.len() {
+        1 => retrieved.pop(),
+        0 => {
+            info!("Creating new user {:?}", user);
+            match user.create(state.store.clone().as_ref()).await {
+                Ok(user) => {
+                    info!("Created {:?}", user);
+                    Some(user)
+                }
+                Err(e) => {
+                    error!("Could not create user: {:?}", e);
+                    None
+                }
+            }
+        },
+        l => {
+            error!("Found {} users with guid {}", l, user.guid);
+            None
         }
-        Err(e) => {
-            error!("{:?}", e);
-        }
-    }
+    };
+
+    debug!("{:?}", retrieved);
 
     Redirect::temporary("/").into_response()
 }

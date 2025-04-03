@@ -24,6 +24,7 @@ use std::{collections::HashMap, sync::Arc, sync::Mutex};
 use tokio::net::TcpListener;
 use tower_http::services::ServeDir;
 use tracing::info;
+use axum::extract::Query;
 
 // state type
 #[derive(Debug)]
@@ -45,11 +46,12 @@ impl AuthrState {
 
 async fn data_get_queries(
     Path(data_type): Path<DataType>,
+    Query(params): Query<HashMap<String, String>>,
     State(state): State<Arc<AuthrState>>,
 ) -> impl IntoResponse {
     match data_type {
         DataType::User => {
-            let data = User::get_queries(&HashMap::new(), state.store.clone().as_ref()).await;
+            let data = User::get_queries(&params, state.store.clone().as_ref()).await;
             Json(data.clone()).into_response()
         }
     }
