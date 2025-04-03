@@ -14,28 +14,28 @@ use crate::types::{User, DataType};
 
 // imports
 use axum::{
-    extract::{Path, State}, handler::HandlerWithoutStateExt, http::StatusCode, response::IntoResponse, routing::{get, post}, Router
+    extract::{Path, State}, handler::HandlerWithoutStateExt, response::IntoResponse, routing::{get, post}, Router
 };
-use oauth2::PkceCodeVerifier;
 use std::{collections::HashMap, sync::Arc, sync::Mutex};
 use tokio::net::TcpListener;
 use tower_http::services::ServeDir;
 use axum::Json;
 use axum::routing::delete;
+use tracing::info;
 
 // state type
 #[derive(Debug)]
 pub struct AuthrState {
-    sessions: Mutex<HashMap<String, PkceCodeVerifier>>,
-    client: GoogleAuthClient,
-    store: Mutex<MemStore>,
+    sessions: Mutex<HashMap<String, String>>,
+    google_client: GoogleAuthClient,
+    store: MemStore,
 }
 
 impl AuthrState {
-    pub fn new(client: GoogleAuthClient, store: Mutex<MemStore>) -> Self {
+    pub fn new(google_client: GoogleAuthClient, store: MemStore) -> Self {
         Self {
-            sessions: Mutex::new(HashMap::<String, PkceCodeVerifier>::new()),
-            client,
+            sessions: Mutex::new(HashMap::<String, String>::new()),
+            google_client,
             store,
         }
     }
@@ -50,22 +50,15 @@ async fn data_get(
     Path((data_type, id)): Path<(DataType, i64)>,
     State(state): State<Arc<AuthrState>>,
 ) -> impl IntoResponse {
-    match state.store.lock() {
-        Ok(store) => {
-            match store.get(id, data_type) {
-                Some(data) => {
-                    let downcasted = data.as_any().downcast_ref::<User>();
-                    if let Some(ins_data) = downcasted {
-                        return Json(ins_data.clone()).into_response()
-                    }
-                    AuthrError::NotFound.into_response()
-                },
-                None => AuthrError::NotFound.into_response(),
+    match state.store.get(id, data_type).await {
+        Some(data) => {
+            let downcasted = data.as_any().downcast_ref::<User>();
+            if let Some(ins_data) = downcasted {
+                return Json(ins_data.clone()).into_response()
             }
+            AuthrError::NotFound.into_response()
         },
-        Err(_) => {
-            (StatusCode::INTERNAL_SERVER_ERROR, "could not get data from store").into_response()
-        },
+        None => AuthrError::NotFound.into_response(),
     }
 }
 
@@ -73,22 +66,15 @@ async fn data_delete(
     Path((data_type, id)): Path<(DataType, i64)>,
     State(state): State<Arc<AuthrState>>,
 ) -> impl IntoResponse {
-    match state.store.lock() {
-        Ok(mut store) => {
-            match store.delete(id, data_type) {
-                Ok(data) => {
-                    let downcasted = data.as_any().downcast_ref::<User>();
-                    if let Some(ins_data) = downcasted {
-                        return Json(ins_data.clone()).into_response()
-                    }
-                    AuthrError::NotFound.into_response()
-                },
-                Err(_) => AuthrError::NotFound.into_response(),
+    match state.store.delete(id, data_type).await {
+        Ok(data) => {
+            let downcasted = data.as_any().downcast_ref::<User>();
+            if let Some(ins_data) = downcasted {
+                return Json(ins_data.clone()).into_response()
             }
+            AuthrError::NotFound.into_response()
         },
-        Err(_) => {
-            (StatusCode::INTERNAL_SERVER_ERROR, "could not get data from store").into_response()
-        },
+        Err(_) => AuthrError::NotFound.into_response(),
     }
 }
 
@@ -99,22 +85,15 @@ async fn data_create(
 ) -> impl IntoResponse {
     match data_type {
         DataType::User => {
-            match state.store.lock() {
-                Ok(mut store) => {
-                    match store.create(&payload) {
-                        Ok(data) => {
-                            let downcasted = data.as_any().downcast_ref::<User>();
-                            if let Some(ins_data) = downcasted {
-                                return Json(ins_data.clone()).into_response()
-                            }
-                            AuthrError::NotFound.into_response()
-                        },
-                        Err(_) => AuthrError::NotFound.into_response(),
+            match state.store.create(&payload).await {
+                Ok(data) => {
+                    let downcasted = data.as_any().downcast_ref::<User>();
+                    if let Some(ins_data) = downcasted {
+                        return Json(ins_data.clone()).into_response()
                     }
+                    AuthrError::NotFound.into_response()
                 },
-                Err(_) => {
-                    (StatusCode::INTERNAL_SERVER_ERROR, "could not get data from store").into_response()
-                }
+                Err(_) => AuthrError::NotFound.into_response(),
             }
         },
     }
@@ -137,5 +116,6 @@ pub async fn run(listener: TcpListener, state: AuthrState) {
             ServeDir::new("static").not_found_service(handle_not_found.into_service()),
         );
 
+    info!("Listening on {:?}", listener.local_addr());
     axum::serve(listener, app).await.unwrap();
 }

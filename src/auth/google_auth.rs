@@ -1,15 +1,10 @@
 use std::{collections::HashMap, sync::Arc};
 
 use axum::{
-    Router,
-    extract::{Query, State},
-    http::StatusCode,
-    response::{self, IntoResponse},
-    routing::get,
+    extract::{Query, State}, http::StatusCode, response::{self, IntoResponse, Redirect}, routing::get, Router
 };
 use oauth2::{
-    AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, EndpointNotSet, EndpointSet,
-    PkceCodeChallenge, RedirectUrl, Scope, TokenResponse, TokenUrl, basic::BasicClient, reqwest,
+    basic::BasicClient, reqwest, AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, EndpointNotSet, EndpointSet, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope, TokenResponse, TokenUrl
 };
 use oauth2::{
     Client, StandardRevocableToken,
@@ -20,7 +15,9 @@ use oauth2::{
 };
 use std::env;
 
-use crate::{AuthrState, error::AuthrError};
+use crate::{error::AuthrError, types::User, AuthrState};
+use serde::{Deserialize, Serialize};
+use tracing::info;
 
 // there has to be a way to get rid of this
 // type SetClient<
@@ -84,7 +81,7 @@ pub async fn login(State(state): State<Arc<AuthrState>>) -> impl IntoResponse {
 
     // Generate the full authorization URL.
     let (auth_url, csrf_token) = state
-        .client
+        .google_client
         .client
         .authorize_url(CsrfToken::new_random)
         // Set the desired scopes.
@@ -96,7 +93,7 @@ pub async fn login(State(state): State<Arc<AuthrState>>) -> impl IntoResponse {
 
     match state.sessions.lock() {
         Ok(mut sessions) => {
-            sessions.insert(csrf_token.into_secret(), pkce_verifier);
+            sessions.insert(csrf_token.into_secret(), pkce_verifier.into_secret());
         }
         Err(_e) => {
             return response::Redirect::permanent("/");
@@ -104,6 +101,17 @@ pub async fn login(State(state): State<Arc<AuthrState>>) -> impl IntoResponse {
     };
 
     response::Redirect::temporary(auth_url.as_str())
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct GoogleUserInfo {
+    id: String,
+    email: String,
+    verified_email: bool,
+    name: String,
+    given_name: String,
+    family_name: String,
+    picture: String,
 }
 
 pub async fn callback(
@@ -152,11 +160,11 @@ pub async fn callback(
 
     // Now you can trade it for an access token.
     let token_result = state
-        .client
+        .google_client
         .client
         .exchange_code(AuthorizationCode::new(code))
         // Set the PKCE code verifier.
-        .set_pkce_verifier(pkce_verifier)
+        .set_pkce_verifier(PkceCodeVerifier::new(pkce_verifier))
         .request_async(&http_client)
         .await
         .unwrap();
@@ -174,15 +182,35 @@ pub async fn callback(
             return (StatusCode::FORBIDDEN, e.to_string()).into_response();
         }
     };
-    match user_data {
-        Ok(user_data) => (
-            StatusCode::OK,
-            [("Content-Type", "application/json")],
-            user_data,
-        )
-            .into_response(),
+    let user_info = match user_data {
+        Ok(user_data) => {
+            let user_info: std::result::Result<GoogleUserInfo, _> = serde_json::from_str(&user_data);
+            match user_info {
+                Ok(user_info) => user_info,
+                Err(e) => {
+                    return (StatusCode::FORBIDDEN, e.to_string()).into_response();
+                },
+            }
+        },
         Err(e) => {
             return (StatusCode::FORBIDDEN, e.to_string()).into_response();
+        }
+    };
+
+    let user = User::from(user_info);
+    info!("{:?}", user);
+
+    Redirect::temporary("/").into_response()
+}
+
+impl From<GoogleUserInfo> for User {
+    fn from(value: GoogleUserInfo) -> Self {
+        Self {
+            id: 0,
+            guid: format!("google/{}", value.id),
+            email: value.email,
+            name: value.name,
+            picture: value.picture,
         }
     }
 }

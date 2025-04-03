@@ -1,9 +1,11 @@
 use super::{DataObject, DataType};
 use serde::{Deserialize, Serialize};
+use sqlx::FromRow;
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(FromRow, Debug, Clone, Deserialize, Serialize)]
 pub struct User {
     pub id: i64,
+    pub guid: String,
     pub name: String,
     pub email: String,
     pub picture: String,
@@ -22,3 +24,4 @@ impl DataObject for User {
         DataType::User
     }
 }
+

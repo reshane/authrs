@@ -1,9 +1,9 @@
 mod user;
-pub use user::User;
 use serde::Deserialize;
 use std::any::Any;
+pub use user::User;
 
-pub(crate) trait DataObject: std::fmt::Debug {
+pub(crate) trait DataObject: std::fmt::Debug + Send + Sync {
     fn id(&self) -> i64;
     fn data_type(&self) -> DataType;
     fn as_any(&self) -> &dyn Any;
@@ -18,4 +18,3 @@ pub(crate) enum DataType {
     #[serde(rename = "user")]
     User,
 }
-
