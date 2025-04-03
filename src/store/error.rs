@@ -13,10 +13,10 @@ impl fmt::Display for StoreError {
         match *self {
             StoreError::NotCreated => {
                 write!(fmt, "The data could not be created",)
-            },
+            }
             StoreError::NotFound => {
                 write!(fmt, "The data could not be found",)
-            },
+            }
         }
     }
 }

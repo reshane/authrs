@@ -1,10 +1,16 @@
 use std::{collections::HashMap, sync::Arc};
 
 use axum::{
-    extract::{Query, State}, http::StatusCode, response::{self, IntoResponse, Redirect}, routing::get, Router
+    Router,
+    extract::{Query, State},
+    http::StatusCode,
+    response::{self, IntoResponse, Redirect},
+    routing::get,
 };
 use oauth2::{
-    basic::BasicClient, reqwest, AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, EndpointNotSet, EndpointSet, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope, TokenResponse, TokenUrl
+    AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, EndpointNotSet, EndpointSet,
+    PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope, TokenResponse, TokenUrl,
+    basic::BasicClient, reqwest,
 };
 use oauth2::{
     Client, StandardRevocableToken,
@@ -15,7 +21,7 @@ use oauth2::{
 };
 use std::env;
 
-use crate::{error::AuthrError, types::User, AuthrState};
+use crate::{AuthrState, error::AuthrError, types::User};
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
@@ -184,14 +190,15 @@ pub async fn callback(
     };
     let user_info = match user_data {
         Ok(user_data) => {
-            let user_info: std::result::Result<GoogleUserInfo, _> = serde_json::from_str(&user_data);
+            let user_info: std::result::Result<GoogleUserInfo, _> =
+                serde_json::from_str(&user_data);
             match user_info {
                 Ok(user_info) => user_info,
                 Err(e) => {
                     return (StatusCode::FORBIDDEN, e.to_string()).into_response();
-                },
+                }
             }
-        },
+        }
         Err(e) => {
             return (StatusCode::FORBIDDEN, e.to_string()).into_response();
         }

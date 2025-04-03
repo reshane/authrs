@@ -2,25 +2,27 @@
 pub mod auth;
 pub mod config;
 pub mod error;
-pub mod types;
 mod store;
+pub mod types;
 
 // internal imports
-pub use crate::store::MemStore;
-use crate::store::Store;
 use crate::auth::google_auth::GoogleAuthClient;
 use crate::error::AuthrError;
-use crate::types::{User, DataType};
+pub use crate::store::PsqlStore;
+use crate::store::Store;
+use crate::types::{DataType, Storeable, User};
 
 // imports
 use axum::{
-    extract::{Path, State}, handler::HandlerWithoutStateExt, response::IntoResponse, routing::{get, post}, Router
+    Json, Router,
+    extract::{Path, State},
+    handler::HandlerWithoutStateExt,
+    response::IntoResponse,
+    routing::{delete, get, post},
 };
 use std::{collections::HashMap, sync::Arc, sync::Mutex};
 use tokio::net::TcpListener;
 use tower_http::services::ServeDir;
-use axum::Json;
-use axum::routing::delete;
 use tracing::info;
 
 // state type
@@ -28,15 +30,15 @@ use tracing::info;
 pub struct AuthrState {
     sessions: Mutex<HashMap<String, String>>,
     google_client: GoogleAuthClient,
-    store: MemStore,
+    store: Arc<PsqlStore>,
 }
 
 impl AuthrState {
-    pub fn new(google_client: GoogleAuthClient, store: MemStore) -> Self {
+    pub fn new(google_client: GoogleAuthClient, store: PsqlStore) -> Self {
         Self {
             sessions: Mutex::new(HashMap::<String, String>::new()),
             google_client,
-            store,
+            store: Arc::new(store),
         }
     }
 }
@@ -50,15 +52,14 @@ async fn data_get(
     Path((data_type, id)): Path<(DataType, i64)>,
     State(state): State<Arc<AuthrState>>,
 ) -> impl IntoResponse {
-    match state.store.get(id, data_type).await {
-        Some(data) => {
-            let downcasted = data.as_any().downcast_ref::<User>();
-            if let Some(ins_data) = downcasted {
-                return Json(ins_data.clone()).into_response()
+    match data_type {
+        DataType::User => {
+            let data = User::get(id, state.store.clone().as_ref()).await;
+            match data {
+                Some(data) => Json(data.clone()).into_response(),
+                None => AuthrError::NotFound.into_response(),
             }
-            AuthrError::NotFound.into_response()
-        },
-        None => AuthrError::NotFound.into_response(),
+        }
     }
 }
 
@@ -66,15 +67,14 @@ async fn data_delete(
     Path((data_type, id)): Path<(DataType, i64)>,
     State(state): State<Arc<AuthrState>>,
 ) -> impl IntoResponse {
-    match state.store.delete(id, data_type).await {
-        Ok(data) => {
-            let downcasted = data.as_any().downcast_ref::<User>();
-            if let Some(ins_data) = downcasted {
-                return Json(ins_data.clone()).into_response()
+    match data_type {
+        DataType::User => {
+            let data = User::delete(id, state.store.clone().as_ref()).await;
+            match data {
+                Ok(data) => Json(data.clone()).into_response(),
+                Err(_) => AuthrError::NotFound.into_response(),
             }
-            AuthrError::NotFound.into_response()
-        },
-        Err(_) => AuthrError::NotFound.into_response(),
+        }
     }
 }
 
@@ -85,17 +85,12 @@ async fn data_create(
 ) -> impl IntoResponse {
     match data_type {
         DataType::User => {
-            match state.store.create(&payload).await {
-                Ok(data) => {
-                    let downcasted = data.as_any().downcast_ref::<User>();
-                    if let Some(ins_data) = downcasted {
-                        return Json(ins_data.clone()).into_response()
-                    }
-                    AuthrError::NotFound.into_response()
-                },
+            let data = payload.create(state.store.clone().as_ref()).await;
+            match data {
+                Ok(data) => Json(data.clone()).into_response(),
                 Err(_) => AuthrError::NotFound.into_response(),
             }
-        },
+        }
     }
 }
 
