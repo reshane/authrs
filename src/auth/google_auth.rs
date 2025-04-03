@@ -21,9 +21,9 @@ use oauth2::{
 };
 use std::env;
 
-use crate::{AuthrState, error::AuthrError, types::User};
+use crate::{AuthrState, Storeable, error::AuthrError, types::User};
 use serde::{Deserialize, Serialize};
-use tracing::info;
+use tracing::{error, info};
 
 // there has to be a way to get rid of this
 // type SetClient<
@@ -205,7 +205,14 @@ pub async fn callback(
     };
 
     let user = User::from(user_info);
-    info!("{:?}", user);
+    match user.create(state.store.clone().as_ref()).await {
+        Ok(user) => {
+            info!("{:?}", user);
+        }
+        Err(e) => {
+            error!("{:?}", e);
+        }
+    }
 
     Redirect::temporary("/").into_response()
 }

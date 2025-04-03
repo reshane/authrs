@@ -9,8 +9,8 @@ pub mod types;
 use crate::auth::google_auth::GoogleAuthClient;
 use crate::error::AuthrError;
 pub use crate::store::PsqlStore;
-use crate::store::Store;
-use crate::types::{DataType, Storeable, User};
+use crate::store::Storeable;
+use crate::types::{DataType, User};
 
 // imports
 use axum::{
@@ -43,9 +43,16 @@ impl AuthrState {
     }
 }
 
-// helper functions
-async fn handle_not_found() -> impl IntoResponse {
-    AuthrError::NotFound.into_response()
+async fn data_get_queries(
+    Path(data_type): Path<DataType>,
+    State(state): State<Arc<AuthrState>>,
+) -> impl IntoResponse {
+    match data_type {
+        DataType::User => {
+            let data = User::get_queries(&HashMap::new(), state.store.clone().as_ref()).await;
+            Json(data.clone()).into_response()
+        }
+    }
 }
 
 async fn data_get(
@@ -94,9 +101,15 @@ async fn data_create(
     }
 }
 
+// helper functions
+async fn handle_not_found() -> impl IntoResponse {
+    AuthrError::NotFound.into_response()
+}
+
 fn data_routes(state: Arc<AuthrState>) -> Router {
     Router::new()
         .route("/{type}/{id}", get(data_get))
+        .route("/{type}", get(data_get_queries))
         .route("/{type}/{id}", delete(data_delete))
         .route("/{type}", post(data_create))
         .with_state(state)

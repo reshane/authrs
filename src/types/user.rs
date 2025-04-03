@@ -1,10 +1,10 @@
+use std::collections::HashMap;
+
 use crate::{
-    Store,
-    store::PsqlStore,
-    store::error::{StoreError, StoreResult},
+    store::{error::{StoreError, StoreResult}, PsqlStore, Storeable}
 };
 
-use super::{DataObject, DataType};
+use super::DataObject;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use tracing::error;
@@ -18,29 +18,7 @@ pub struct User {
     pub picture: String,
 }
 
-impl DataObject for User {
-    fn id(&self) -> i32 {
-        self.id
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
-    fn data_type(&self) -> super::DataType {
-        DataType::User
-    }
-}
-
-pub(crate) trait Storeable<T, DO>
-where
-    T: Store,
-    DO: DataObject,
-{
-    async fn get(id: i64, store: &T) -> Option<DO>;
-    async fn create(&self, store: &T) -> StoreResult<DO>;
-    async fn delete(id: i64, store: &T) -> StoreResult<DO>;
-}
+impl DataObject for User {}
 
 impl Storeable<PsqlStore, User> for User {
     async fn get(id: i64, store: &PsqlStore) -> Option<User> {
@@ -53,6 +31,19 @@ impl Storeable<PsqlStore, User> for User {
             Err(e) => {
                 error!("{:?}", e);
                 None
+            }
+        }
+    }
+
+    async fn get_queries(_queries: &HashMap<String, String>, store: &PsqlStore) -> Vec<User> {
+        let users = sqlx::query_as::<_, User>("select * from users")
+            .fetch_all(&store.pool)
+            .await;
+        match users {
+            Ok(users) => users,
+            Err(e) => {
+                error!("{:?}", e);
+                vec![]
             }
         }
     }
