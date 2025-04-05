@@ -3,10 +3,14 @@ use std::{collections::HashMap, sync::Arc};
 use axum::{
     Router,
     extract::{Query, State},
-    http::StatusCode,
-    response::{self, IntoResponse, Redirect},
+    http::{
+        StatusCode,
+        header::{LOCATION, SET_COOKIE},
+    },
+    response::{self, AppendHeaders, IntoResponse},
     routing::get,
 };
+use axum_extra::extract::cookie::Cookie;
 use oauth2::{
     AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, EndpointNotSet, EndpointSet,
     PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope, TokenResponse, TokenUrl,
@@ -97,16 +101,17 @@ pub async fn login(State(state): State<Arc<AuthrState>>) -> impl IntoResponse {
         .set_pkce_challenge(pkce_challenge)
         .url();
 
-    match state.sessions.lock() {
-        Ok(mut sessions) => {
-            sessions.insert(csrf_token.into_secret(), pkce_verifier.into_secret());
+    match state.oauth_sessions.lock() {
+        Ok(mut oauth_sessions) => {
+            oauth_sessions.insert(csrf_token.into_secret(), pkce_verifier.secret().clone());
         }
-        Err(_e) => {
-            return response::Redirect::permanent("/");
+        Err(e) => {
+            error!("{:?}", e);
+            return response::Redirect::temporary("/").into_response();
         }
     };
 
-    response::Redirect::temporary(auth_url.as_str())
+    response::Redirect::temporary(auth_url.as_str()).into_response()
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -140,10 +145,11 @@ pub async fn callback(
         }
     };
 
-    let pkce_verifier = match state.sessions.lock() {
+    let pkce_verifier = match state.oauth_sessions.lock() {
         Ok(mut sessions) => sessions.remove(token.as_str()),
         Err(e) => {
-            return (StatusCode::FORBIDDEN, format!("{:?}", e)).into_response();
+            error!("{:?}", e);
+            return AuthrError::NotAuthorized.into_response();
         }
     };
 
@@ -185,7 +191,8 @@ pub async fn callback(
     let user_data = match user_data {
         Ok(user_data) => user_data.text().await,
         Err(e) => {
-            return (StatusCode::FORBIDDEN, e.to_string()).into_response();
+            error!("{:?}", e);
+            return AuthrError::NotAuthorized.into_response();
         }
     };
     let user_info = match user_data {
@@ -195,12 +202,14 @@ pub async fn callback(
             match user_info {
                 Ok(user_info) => user_info,
                 Err(e) => {
-                    return (StatusCode::FORBIDDEN, e.to_string()).into_response();
+                    error!("{:?}", e);
+                    return AuthrError::NotAuthorized.into_response();
                 }
             }
         }
         Err(e) => {
-            return (StatusCode::FORBIDDEN, e.to_string()).into_response();
+            error!("{:?}", e);
+            return AuthrError::NotAuthorized.into_response();
         }
     };
 
@@ -222,16 +231,50 @@ pub async fn callback(
                     None
                 }
             }
-        },
+        }
         l => {
             error!("Found {} users with guid {}", l, user.guid);
             None
         }
     };
 
-    debug!("{:?}", retrieved);
+    // Generate a PKCE challenge for a new session_id & set cookie
+    let (_pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
 
-    Redirect::temporary("/").into_response()
+    let cookie_exp_duration = time::Duration::minutes(10);
+    match state.sessions.lock() {
+        Ok(mut sessions) => {
+            let now = time::OffsetDateTime::now_utc();
+            let expires = now.checked_add(cookie_exp_duration);
+            match expires {
+                Some(expires) => {
+                    sessions.insert(pkce_verifier.secret().clone(), (user, expires));
+                }
+                None => {
+                    error!("Could not add {:?} and {:?}", now, cookie_exp_duration);
+                    return AuthrError::NotAuthorized.into_response();
+                }
+            }
+        }
+        Err(e) => {
+            error!("{:?}", e);
+            return AuthrError::NotAuthorized.into_response();
+        }
+    };
+
+    debug!("{:?}", retrieved);
+    let pkce_str = pkce_verifier.into_secret();
+    let cookie = Cookie::build(("session_id", pkce_str.as_str()))
+        .path("/")
+        .max_age(cookie_exp_duration)
+        .http_only(true)
+        .build();
+
+    (
+        StatusCode::TEMPORARY_REDIRECT,
+        AppendHeaders([(SET_COOKIE, cookie.to_string().as_str()), (LOCATION, "/")]),
+    )
+        .into_response()
 }
 
 impl From<GoogleUserInfo> for User {

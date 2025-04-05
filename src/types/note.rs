@@ -11,39 +11,38 @@ use sqlx::FromRow;
 use tracing::{debug, error};
 
 #[derive(FromRow, Debug, Clone, Deserialize, Serialize)]
-pub struct User {
+pub struct Note {
     pub id: i32,
-    pub guid: String,
-    pub name: String,
-    pub email: String,
-    pub picture: String,
+    pub owner_id: i32,
+    pub contents: String,
 }
 
-impl DataObject for User {
+impl DataObject for Note {
     fn get_id(&self) -> i32 {
         self.id
     }
     fn get_owner_author_id(&self) -> i32 {
-        self.id
+        self.owner_id
     }
 }
-impl DataMeta for User {
+
+impl DataMeta for Note {
     fn get_id_col() -> &'static str {
         "id"
     }
     fn get_owner_author_col() -> &'static str {
-        "id"
+        "owner_id"
     }
 }
 
-impl Storeable<PsqlStore, User> for User {
-    async fn get(id: i64, store: &PsqlStore) -> Option<User> {
-        let user = sqlx::query_as::<_, User>("select * from users where id = ($1)")
+impl Storeable<PsqlStore, Note> for Note {
+    async fn get(id: i64, store: &PsqlStore) -> Option<Note> {
+        let note = sqlx::query_as::<_, Note>("select * from notes where id = ($1)")
             .bind(id)
             .fetch_one(&store.pool)
             .await;
-        match user {
-            Ok(user) => Some(user),
+        match note {
+            Ok(note) => Some(note),
             Err(e) => {
                 error!("{:?}", e);
                 None
@@ -51,7 +50,7 @@ impl Storeable<PsqlStore, User> for User {
         }
     }
 
-    async fn get_queries(queries: &HashMap<String, String>, store: &PsqlStore) -> Vec<User> {
+    async fn get_queries(queries: &HashMap<String, String>, store: &PsqlStore) -> Vec<Note> {
         let mut clauses = vec![];
         let mut values = vec![];
         for (i, (k, v)) in queries.iter().enumerate() {
@@ -60,14 +59,14 @@ impl Storeable<PsqlStore, User> for User {
             values.push(v);
         }
         let sql = if clauses.len() == 0 {
-            "select * from users".to_string()
+            "select * from notes".to_string()
         } else {
-            format!("select * from users where {}", clauses.join(" and "))
+            format!("select * from notes where {}", clauses.join(" and "))
         };
 
         debug!("{}", sql);
 
-        let mut query = sqlx::query_as::<_, User>(sql.as_str());
+        let mut query = sqlx::query_as::<_, Note>(sql.as_str());
 
         for v in values.into_iter() {
             query = query.bind(v);
@@ -83,18 +82,16 @@ impl Storeable<PsqlStore, User> for User {
         }
     }
 
-    async fn create(&self, store: &PsqlStore) -> StoreResult<User> {
-        let user = sqlx::query_as::<_, User>(
-            "insert into users (guid,name,email,picture) values ($1,$2,$3,$4) returning *",
+    async fn create(&self, store: &PsqlStore) -> StoreResult<Note> {
+        let note = sqlx::query_as::<_, Note>(
+            "insert into notes (owner_id,contents) values ($1,$2) returning *",
         )
-        .bind(self.guid.clone())
-        .bind(self.name.clone())
-        .bind(self.email.clone())
-        .bind(self.picture.clone())
+        .bind(self.owner_id.clone())
+        .bind(self.contents.clone())
         .fetch_one(&store.pool)
         .await;
-        match user {
-            Ok(user) => Ok(user),
+        match note {
+            Ok(note) => Ok(note),
             Err(e) => {
                 error!("{:?}", e);
                 Err(StoreError::NotCreated)
@@ -102,13 +99,13 @@ impl Storeable<PsqlStore, User> for User {
         }
     }
 
-    async fn delete(id: i64, store: &PsqlStore) -> StoreResult<User> {
-        let user = sqlx::query_as::<_, User>("delete from users where id = ($1) returning *")
+    async fn delete(id: i64, store: &PsqlStore) -> StoreResult<Note> {
+        let note = sqlx::query_as::<_, Note>("delete from notes where id = ($1) returning *")
             .bind(id)
             .fetch_one(&store.pool)
             .await;
-        match user {
-            Ok(user) => Ok(user),
+        match note {
+            Ok(note) => Ok(note),
             Err(e) => {
                 error!("{:?}", e);
                 Err(StoreError::NotFound)

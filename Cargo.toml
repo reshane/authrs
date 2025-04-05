@@ -15,4 +15,8 @@ sea-query = "0"
 sea-query-binder = { version = "0", features = ["sqlx-postgres", "runtime-async-std-native-tls"] }
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 tracing = "0.1.41"
+axum-extra = { version = "0.10.1", features = ["cookie"] }
+tower = "0.5.2"
+futures-util = "0.3.31"
+time = "0.3.41"
 
