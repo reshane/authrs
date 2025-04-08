@@ -214,14 +214,14 @@ pub async fn callback(
     };
 
     let user = RequestUser::from(user_info);
-    let mut retrieved: Vec<User> = state.store.clone().lock().unwrap().get_queries::<User>(
-        vec![EqualsQuery{ field: "guid".to_string(), val: sqlite::Value::String(user.guid.clone().unwrap()) }]
+    let mut retrieved: Vec<User> = state.store.clone().get_queries::<User>(
+        vec![Box::new(EqualsQuery{ field: "guid".to_string(), val: sqlite::Value::String(user.guid.clone().unwrap()) })]
     );
     let retrieved = match retrieved.len() {
         1 => retrieved.pop(),
         0 => {
             info!("Creating new user {:?}", user);
-            match state.store.clone().lock().unwrap().create(user) {
+            match state.store.clone().create(user) {
                 Ok(user) => {
                     info!("Created {:?}", user);
                     Some(user)

@@ -58,7 +58,6 @@ impl Bindable for RequestNote {
         }
         if let Some(contents) = self.contents {
             contents.clone().as_str().bind(statement, idx)?;
-            idx += 1;
         }
         Ok(())
     }
@@ -66,10 +65,19 @@ impl Bindable for RequestNote {
 
 impl RequestObject for RequestNote {
     fn validate_create(&self) -> Result<(), ValidationError> {
-        match self.id {
-            Some(_) => Err(ValidationError::MissingIdOnUpdate),
-            None => Ok(()),
+        match self.owner_id {
+            Some(_) => {},
+            None => { return Err(ValidationError::MissingRequiredOnCreate(String::from("owner_id"))); },
         }
+        match self.contents {
+            Some(_) => {},
+            None => { return Err(ValidationError::MissingRequiredOnCreate(String::from("contents"))); },
+        }
+        match self.id {
+            Some(_) => { return Err(ValidationError::IdProvidedOnCreate); },
+            None => {},
+        }
+        Ok(())
     }
 
     fn validate_update(&self) -> Result<(), ValidationError> {

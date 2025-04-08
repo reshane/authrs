@@ -2,6 +2,15 @@
 name = "authrs"
 version = "0.1.0"
 edition = "2024"
+default-run = "authrs"
+
+[[bin]]
+name = "authrs"
+path = "src/main.rs"
+
+[[bin]]
+name = "bootstrap"
+path = "src/bin/bootstrap.rs"
 
 [dependencies]
 axum = { version = "0.8.3", features = ["macros"] }

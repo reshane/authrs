@@ -28,7 +28,7 @@ pub(crate) enum DataType {
     Note,
 }
 
-pub(crate) trait RequestObject: Bindable {
+pub(crate) trait RequestObject: Sized + Bindable + std::fmt::Debug + Clone {
     fn validate_create(&self) -> Result<(), ValidationError>;
     fn validate_update(&self) -> Result<(), ValidationError>;
     fn sql_cols(&self) -> String;
@@ -37,7 +37,7 @@ pub(crate) trait RequestObject: Bindable {
 }
 
 #[derive(Debug)]
-enum ValidationError {
+pub(crate) enum ValidationError {
     MissingIdOnUpdate,
     MissingRequiredOnCreate(String),
     IdProvidedOnCreate,

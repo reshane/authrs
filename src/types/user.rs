@@ -80,7 +80,6 @@ impl Bindable for RequestUser {
         }
         if let Some(picture) = self.picture {
             picture.clone().as_str().bind(statement, idx)?;
-            idx += 1;
         }
         Ok(())
     }
@@ -88,10 +87,27 @@ impl Bindable for RequestUser {
 
 impl RequestObject for RequestUser {
     fn validate_create(&self) -> Result<(), ValidationError> {
-        match self.id {
-            Some(_) => Err(ValidationError::MissingIdOnUpdate),
-            None => Ok(()),
+        match self.guid {
+            Some(_) => {},
+            None => { return Err(ValidationError::MissingRequiredOnCreate(String::from("guid"))); },
         }
+        match self.name {
+            Some(_) => {},
+            None => { return Err(ValidationError::MissingRequiredOnCreate(String::from("name"))); },
+        }
+        match self.email {
+            Some(_) => {},
+            None => { return Err(ValidationError::MissingRequiredOnCreate(String::from("email"))); },
+        }
+        match self.picture {
+            Some(_) => {},
+            None => { return Err(ValidationError::MissingRequiredOnCreate(String::from("picture"))); },
+        }
+        match self.id {
+            Some(_) => { return Err(ValidationError::IdProvidedOnCreate); },
+            None => {},
+        }
+        Ok(())
     }
 
     fn validate_update(&self) -> Result<(), ValidationError> {

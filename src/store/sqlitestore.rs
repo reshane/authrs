@@ -1,17 +1,19 @@
+use std::sync::Mutex;
 use sqlite::{Connection, Value};
+use tracing::debug;
 
 use crate::{types::DataObject, RequestObject};
 
 use super::{error::StoreResult, Query, Store};
 
 pub struct SqliteStore {
-    conn: Connection,
+    conn: Mutex<Connection>,
 }
 
 impl SqliteStore {
     pub fn new() -> Self {
         let connection = sqlite::open("test.db").unwrap();
-        Self { conn: connection }
+        Self { conn: Mutex::new(connection) }
     }
 }
 
@@ -24,11 +26,16 @@ impl Store for SqliteStore {
             data.sql_placeholders(),
             T::sql_cols()
         );
-        let mut statement = self.conn.prepare(query).unwrap();
-        statement.bind(data).unwrap();
-        let data: Vec<T> = T::from_rows(&mut statement);
-        if data.len() >= 1 {
-            Ok(data[0].clone())
+        debug!("{}", query);
+        if let Ok(conn) = self.conn.lock() {
+            let mut statement = conn.prepare(query).unwrap();
+            statement.bind(data).unwrap();
+            let data: Vec<T> = T::from_rows(&mut statement);
+            if data.len() >= 1 {
+                Ok(data[0].clone())
+            } else {
+                Err(super::error::StoreError::NotCreated)
+            }
         } else {
             Err(super::error::StoreError::NotCreated)
         }
@@ -50,12 +57,16 @@ impl Store for SqliteStore {
             T::id_col(),
             T::sql_cols()
         );
-        let mut statement = self.conn.prepare(query).unwrap();
-        statement.bind(data).unwrap();
-        statement.bind((":id", id)).unwrap();
-        let data: Vec<T> = T::from_rows(&mut statement);
-        if data.len() >= 1 {
-            Ok(data[0].clone())
+        if let Ok(conn) = self.conn.lock() {
+            let mut statement = conn.prepare(query).unwrap();
+            statement.bind(data).unwrap();
+            statement.bind((":id", id)).unwrap();
+            let data: Vec<T> = T::from_rows(&mut statement);
+            if data.len() >= 1 {
+                Ok(data[0].clone())
+            } else {
+                Err(super::error::StoreError::NotCreated)
+            }
         } else {
             Err(super::error::StoreError::NotCreated)
         }
@@ -63,17 +74,21 @@ impl Store for SqliteStore {
 
     fn get<T: DataObject>(&self, id: i64) -> Option<T> {
         let query = format!("SELECT * FROM {} where id = ?", T::table_name());
-        let mut statement = self.conn.prepare(query).unwrap();
-        statement.bind((1, id)).unwrap();
-        let data: Vec<T> = T::from_rows(&mut statement);
-        if data.len() >= 1 {
-            Some(data[0].clone())
+        if let Ok(conn) = self.conn.lock() {
+            let mut statement = conn.prepare(query).unwrap();
+            statement.bind((1, id)).unwrap();
+            let data: Vec<T> = T::from_rows(&mut statement);
+            if data.len() >= 1 {
+                Some(data[0].clone())
+            } else {
+                None
+            }
         } else {
             None
         }
     }
 
-    fn get_queries<T: DataObject>(&self, queries: Vec<impl Query>) -> Vec<T> {
+    fn get_queries<T: DataObject>(&self, queries: Vec<Box<dyn Query>>) -> Vec<T> {
         let mut clauses = vec![];
         let mut bindables = vec![];
         for (i, q) in queries.iter().enumerate() {
@@ -86,12 +101,17 @@ impl Store for SqliteStore {
             let clauses_str = format!(" where {}", clauses.join(" and "));
             query.push_str(clauses_str.as_str());
         }
-        let mut statement = self.conn.prepare(query).unwrap();
-        statement
-            .bind::<&[(_, Value)]>(&bindables.as_slice()[..])
-            .unwrap();
-        let data: Vec<T> = T::from_rows(&mut statement);
-        data
+        debug!("{}", query);
+        if let Ok(conn) = self.conn.lock() {
+            let mut statement = conn.prepare(query).unwrap();
+            statement
+                .bind::<&[(_, Value)]>(&bindables.as_slice()[..])
+                .unwrap();
+            let data: Vec<T> = T::from_rows(&mut statement);
+            data
+        } else {
+            vec![]
+        }
     }
 
     fn delete<T: DataObject>(&self, id: i64) -> StoreResult<T> {
@@ -100,11 +120,15 @@ impl Store for SqliteStore {
             T::table_name(),
             T::sql_cols()
         );
-        let mut statement = self.conn.prepare(query).unwrap();
-        statement.bind((1, id)).unwrap();
-        let data: Vec<T> = T::from_rows(&mut statement);
-        if data.len() >= 1 {
-            Ok(data[0].clone())
+        if let Ok(conn) = self.conn.lock() {
+            let mut statement = conn.prepare(query).unwrap();
+            statement.bind((1, id)).unwrap();
+            let data: Vec<T> = T::from_rows(&mut statement);
+            if data.len() >= 1 {
+                Ok(data[0].clone())
+            } else {
+                Err(super::error::StoreError::NotFound)
+            }
         } else {
             Err(super::error::StoreError::NotFound)
         }
