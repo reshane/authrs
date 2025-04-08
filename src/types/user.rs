@@ -1,118 +1,127 @@
-use std::collections::HashMap;
-
-use crate::store::{
-    PsqlStore, Storeable,
-    error::{StoreError, StoreResult},
-};
-
-use super::{DataMeta, DataObject};
+use super::{DataObject, RequestObject, ValidationError};
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
-use tracing::{debug, error};
+use sqlite::{Bindable, BindableWithIndex, State, Statement};
 
-#[derive(FromRow, Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct User {
-    pub id: i32,
+    pub id: i64,
     pub guid: String,
     pub name: String,
     pub email: String,
     pub picture: String,
 }
 
+impl Bindable for User {
+    fn bind(self, statement: &mut Statement) -> sqlite::Result<()> {
+        self.id.clone().bind(statement, 1)?;
+        self.guid.clone().as_str().bind(statement, 2)?;
+        self.name.clone().as_str().bind(statement, 3)?;
+        self.email.clone().as_str().bind(statement, 4)?;
+        self.picture.clone().as_str().bind(statement, 5)?;
+        Ok(())
+    }
+}
+
 impl DataObject for User {
-    fn get_id(&self) -> i32 {
-        self.id
+    fn from_rows(statement: &mut Statement) -> Vec<Self> {
+        let mut res = vec![];
+        while let Ok(State::Row) = statement.next() {
+            res.push(Self {
+                id: statement.read::<i64, _>("id").unwrap(),
+                guid: statement.read::<String, _>("guid").unwrap(),
+                name: statement.read::<String, _>("name").unwrap(),
+                email: statement.read::<String, _>("email").unwrap(),
+                picture: statement.read::<String, _>("picture").unwrap(),
+            });
+        }
+        return res;
     }
-    fn get_owner_author_id(&self) -> i32 {
-        self.id
+
+    fn table_name() -> String {
+        "users".to_string()
+    }
+
+    fn sql_cols() -> String {
+        "id,guid,name,email,picture".to_string()
+    }
+
+    fn id_col() -> String {
+        "id".to_string()
     }
 }
-impl DataMeta for User {
-    fn get_id_col() -> &'static str {
-        "id"
-    }
-    fn get_owner_author_col() -> &'static str {
-        "id"
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RequestUser {
+    pub id: Option<i64>,
+    pub guid: Option<String>,
+    pub name: Option<String>,
+    pub email: Option<String>,
+    pub picture: Option<String>,
+}
+
+impl Bindable for RequestUser {
+    fn bind(self, statement: &mut Statement) -> sqlite::Result<()> {
+        let mut idx = 1;
+        if let Some(id) = self.id {
+            id.clone().bind(statement, idx)?;
+            idx += 1;
+        }
+        if let Some(guid) = self.guid {
+            guid.clone().as_str().bind(statement, idx)?;
+            idx += 1;
+        }
+        if let Some(name) = self.name {
+            name.clone().as_str().bind(statement, idx)?;
+            idx += 1;
+        }
+        if let Some(email) = self.email {
+            email.clone().as_str().bind(statement, idx)?;
+            idx += 1;
+        }
+        if let Some(picture) = self.picture {
+            picture.clone().as_str().bind(statement, idx)?;
+            idx += 1;
+        }
+        Ok(())
     }
 }
 
-impl Storeable<PsqlStore, User> for User {
-    async fn get(id: i64, store: &PsqlStore) -> Option<User> {
-        let user = sqlx::query_as::<_, User>("select * from users where id = ($1)")
-            .bind(id)
-            .fetch_one(&store.pool)
-            .await;
-        match user {
-            Ok(user) => Some(user),
-            Err(e) => {
-                error!("{:?}", e);
-                None
-            }
+impl RequestObject for RequestUser {
+    fn validate_create(&self) -> Result<(), ValidationError> {
+        match self.id {
+            Some(_) => Err(ValidationError::MissingIdOnUpdate),
+            None => Ok(()),
         }
     }
 
-    async fn get_queries(queries: &HashMap<String, String>, store: &PsqlStore) -> Vec<User> {
-        let mut clauses = vec![];
-        let mut values = vec![];
-        for (i, (k, v)) in queries.iter().enumerate() {
-            debug!("{} = ${} ({})", k, i + 1, v);
-            clauses.push(format!("({} = ${})", k, i + 1));
-            values.push(v);
-        }
-        let sql = if clauses.len() == 0 {
-            "select * from users".to_string()
-        } else {
-            format!("select * from users where {}", clauses.join(" and "))
-        };
-
-        debug!("{}", sql);
-
-        let mut query = sqlx::query_as::<_, User>(sql.as_str());
-
-        for v in values.into_iter() {
-            query = query.bind(v);
-        }
-
-        let users = query.fetch_all(&store.pool).await;
-        match users {
-            Ok(users) => users,
-            Err(e) => {
-                error!("{:?}", e);
-                vec![]
-            }
+    fn validate_update(&self) -> Result<(), ValidationError> {
+        match self.id {
+            Some(_) => Ok(()),
+            None => Err(ValidationError::MissingIdOnUpdate),
         }
     }
 
-    async fn create(&self, store: &PsqlStore) -> StoreResult<User> {
-        let user = sqlx::query_as::<_, User>(
-            "insert into users (guid,name,email,picture) values ($1,$2,$3,$4) returning *",
-        )
-        .bind(self.guid.clone())
-        .bind(self.name.clone())
-        .bind(self.email.clone())
-        .bind(self.picture.clone())
-        .fetch_one(&store.pool)
-        .await;
-        match user {
-            Ok(user) => Ok(user),
-            Err(e) => {
-                error!("{:?}", e);
-                Err(StoreError::NotCreated)
-            }
-        }
+    fn sql_cols(&self) -> String {
+        let mut cols = vec![];
+        if let Some(_) = self.id { cols.push("id"); }
+        if let Some(_) = self.guid { cols.push("guid"); }
+        if let Some(_) = self.name { cols.push("name"); }
+        if let Some(_) = self.email { cols.push("email"); }
+        if let Some(_) = self.picture { cols.push("picture"); }
+        cols.join(",")
     }
 
-    async fn delete(id: i64, store: &PsqlStore) -> StoreResult<User> {
-        let user = sqlx::query_as::<_, User>("delete from users where id = ($1) returning *")
-            .bind(id)
-            .fetch_one(&store.pool)
-            .await;
-        match user {
-            Ok(user) => Ok(user),
-            Err(e) => {
-                error!("{:?}", e);
-                Err(StoreError::NotFound)
-            }
-        }
+    fn sql_placeholders(&self) -> String {
+        let mut ct = 0;
+        if let Some(_) = self.id { ct += 1; }
+        if let Some(_) = self.guid { ct += 1; }
+        if let Some(_) = self.name { ct += 1; }
+        if let Some(_) = self.email {ct += 1; }
+        if let Some(_) = self.picture { ct += 1; }
+        vec!["?"; ct].join(",")
+    }
+
+    fn id(&self) -> Option<i64> {
+        self.id
     }
 }

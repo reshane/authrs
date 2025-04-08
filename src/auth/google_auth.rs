@@ -25,7 +25,7 @@ use oauth2::{
 };
 use std::env;
 
-use crate::{AuthrState, Storeable, error::AuthrError, types::User};
+use crate::{error::AuthrError, store::EqualsQuery, types::{RequestUser, User}, AuthrState, Store};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info};
 
@@ -213,15 +213,15 @@ pub async fn callback(
         }
     };
 
-    let user = User::from(user_info);
-    let mut guid_query = HashMap::new();
-    guid_query.insert("guid".to_string(), user.guid.clone());
-    let mut retrieved = User::get_queries(&guid_query, state.store.clone().as_ref()).await;
+    let user = RequestUser::from(user_info);
+    let mut retrieved: Vec<User> = state.store.clone().lock().unwrap().get_queries::<User>(
+        vec![EqualsQuery{ field: "guid".to_string(), val: sqlite::Value::String(user.guid.clone().unwrap()) }]
+    );
     let retrieved = match retrieved.len() {
         1 => retrieved.pop(),
         0 => {
             info!("Creating new user {:?}", user);
-            match user.create(state.store.clone().as_ref()).await {
+            match state.store.clone().lock().unwrap().create(user) {
                 Ok(user) => {
                     info!("Created {:?}", user);
                     Some(user)
@@ -233,7 +233,7 @@ pub async fn callback(
             }
         }
         l => {
-            error!("Found {} users with guid {}", l, user.guid);
+            error!("Found {} users with guid {}", l, user.guid.unwrap().clone());
             None
         }
     };
@@ -248,7 +248,7 @@ pub async fn callback(
             let expires = now.checked_add(cookie_exp_duration);
             match expires {
                 Some(expires) => {
-                    sessions.insert(pkce_verifier.secret().clone(), (user, expires));
+                    sessions.insert(pkce_verifier.secret().clone(), (retrieved.clone().unwrap(), expires));
                 }
                 None => {
                     error!("Could not add {:?} and {:?}", now, cookie_exp_duration);
@@ -277,14 +277,14 @@ pub async fn callback(
         .into_response()
 }
 
-impl From<GoogleUserInfo> for User {
+impl From<GoogleUserInfo> for RequestUser {
     fn from(value: GoogleUserInfo) -> Self {
         Self {
-            id: 0,
-            guid: format!("google/{}", value.id),
-            email: value.email,
-            name: value.name,
-            picture: value.picture,
+            id: None,
+            guid: Some(format!("google/{}", value.id)),
+            email: Some(value.email),
+            name: Some(value.name),
+            picture: Some(value.picture),
         }
     }
 }

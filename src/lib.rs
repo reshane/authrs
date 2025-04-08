@@ -8,12 +8,12 @@ pub mod types;
 // internal imports
 use crate::auth::google_auth::GoogleAuthClient;
 use crate::error::AuthrError;
-pub use crate::store::PsqlStore;
-use crate::store::Storeable;
-use crate::types::{DataType, User};
+use crate::store::Store;
+pub use crate::store::SqliteStore;
+use crate::types::{DataType, Note, RequestNote, RequestObject, User, RequestUser};
 
-use axum::http::StatusCode;
 // imports
+use axum::http::StatusCode;
 use axum::extract::Query;
 use axum::middleware;
 use axum::{
@@ -23,45 +23,45 @@ use axum::{
     response::IntoResponse,
     routing::{delete, get, post},
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
+use store::EqualsQuery;
+use types::DataObject;
 use std::{collections::HashMap, sync::Arc, sync::Mutex};
 use tokio::net::TcpListener;
 use tower_http::services::ServeDir;
 use tracing::{error, info};
-use types::{DataObject, Note};
 
 // state type
-#[derive(Debug)]
 pub struct AuthrState {
     oauth_sessions: Mutex<HashMap<String, String>>,
     sessions: Mutex<HashMap<String, (User, time::OffsetDateTime)>>,
     google_client: GoogleAuthClient,
-    store: Arc<PsqlStore>,
+    store: Arc<Mutex<SqliteStore>>,
 }
 
 impl AuthrState {
-    pub fn new(google_client: GoogleAuthClient, store: PsqlStore) -> Self {
+    pub fn new(google_client: GoogleAuthClient, store: SqliteStore) -> Self {
         Self {
             oauth_sessions: Mutex::new(HashMap::<String, String>::new()),
             sessions: Mutex::new(HashMap::<String, (User, time::OffsetDateTime)>::new()),
             google_client,
-            store: Arc::new(store),
+            store: Arc::new(Mutex::new(store)),
         }
     }
 }
 
 async fn data_get_queries(
     Path(data_type): Path<DataType>,
-    Query(params): Query<HashMap<String, String>>,
+    Query(_params): Query<HashMap<String, String>>,
     State(state): State<Arc<AuthrState>>,
 ) -> impl IntoResponse {
     match data_type {
         DataType::User => {
-            let data = User::get_queries(&params, state.store.clone().as_ref()).await;
+            let data = state.store.clone().lock().unwrap().get_queries::<User>(Vec::<EqualsQuery>::new());
             Json(data.clone()).into_response()
         }
         DataType::Note => {
-            let data = Note::get_queries(&params, state.store.clone().as_ref()).await;
+            let data = state.store.clone().lock().unwrap().get_queries::<Note>(Vec::<EqualsQuery>::new());
             Json(data.clone()).into_response()
         }
     }
@@ -73,14 +73,14 @@ async fn data_get(
 ) -> impl IntoResponse {
     match data_type {
         DataType::User => {
-            let data = User::get(id, state.store.clone().as_ref()).await;
+            let data: Option<User> = state.store.clone().lock().unwrap().get(id);
             match data {
                 Some(data) => Json(data.clone()).into_response(),
                 None => AuthrError::NotFound.into_response(),
             }
         }
         DataType::Note => {
-            let data = Note::get(id, state.store.clone().as_ref()).await;
+            let data: Option<Note> = state.store.clone().lock().unwrap().get(id);
             match data {
                 Some(data) => Json(data.clone()).into_response(),
                 None => AuthrError::NotFound.into_response(),
@@ -95,14 +95,14 @@ async fn data_delete(
 ) -> impl IntoResponse {
     match data_type {
         DataType::User => {
-            let data = User::delete(id, state.store.clone().as_ref()).await;
+            let data = state.store.clone().lock().unwrap().delete::<User>(id);
             match data {
                 Ok(data) => Json(data.clone()).into_response(),
                 Err(_) => AuthrError::NotFound.into_response(),
             }
         }
         DataType::Note => {
-            let data = Note::delete(id, state.store.clone().as_ref()).await;
+            let data = state.store.clone().lock().unwrap().delete::<Note>(id);
             match data {
                 Ok(data) => Json(data.clone()).into_response(),
                 Err(_) => AuthrError::NotFound.into_response(),
@@ -111,11 +111,11 @@ async fn data_delete(
     }
 }
 
-async fn handle_create<T: Clone + DataObject + Serialize + Storeable<PsqlStore, T>>(
-    payload: T,
+async fn handle_create<R: RequestObject + Clone, T: DataObject + Serialize> (
+    payload: R,
     state: Arc<AuthrState>,
 ) -> impl IntoResponse {
-    let data = payload.create(state.store.clone().as_ref()).await;
+    let data = state.store.clone().lock().unwrap().create::<_, T>(payload);
     match data {
         Ok(data) => Json(data.clone()).into_response(),
         Err(_) => AuthrError::NotFound.into_response(),
@@ -128,15 +128,15 @@ async fn data_create(
     body: String,
 ) -> impl IntoResponse {
     match data_type {
-        DataType::User => match serde_json::from_str::<User>(body.as_str()) {
-            Ok(payload) => handle_create(payload, state).await.into_response(),
+        DataType::User => match serde_json::from_str::<RequestUser>(body.as_str()) {
+            Ok(payload) => handle_create::<_, User>(payload, state).await.into_response(),
             Err(e) => {
                 error!("{:?}", e);
                 return (StatusCode::BAD_REQUEST, "Bad Request").into_response();
             }
         },
-        DataType::Note => match serde_json::from_str::<Note>(body.as_str()) {
-            Ok(payload) => handle_create(payload, state).await.into_response(),
+        DataType::Note => match serde_json::from_str::<RequestNote>(body.as_str()) {
+            Ok(payload) => handle_create::<_, Note>(payload, state).await.into_response(),
             Err(e) => {
                 error!("{:?}", e);
                 return (StatusCode::BAD_REQUEST, "Bad Request").into_response();

@@ -1,115 +1,101 @@
-use std::collections::HashMap;
-
-use crate::store::{
-    PsqlStore, Storeable,
-    error::{StoreError, StoreResult},
-};
-
-use super::{DataMeta, DataObject};
+use super::{DataObject, RequestObject, ValidationError};
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
-use tracing::{debug, error};
+use sqlite::{Bindable, BindableWithIndex, State};
 
-#[derive(FromRow, Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Note {
-    pub id: i32,
-    pub owner_id: i32,
+    pub id: i64,
+    pub owner_id: i64,
     pub contents: String,
 }
 
+impl Bindable for Note {
+    fn bind(self, statement: &mut sqlite::Statement) -> sqlite::Result<()> {
+        self.id.clone().bind(statement, 1)?;
+        self.owner_id.clone().bind(statement, 2)?;
+        self.contents.clone().as_str().bind(statement, 3)?;
+        Ok(())
+    }
+}
+
 impl DataObject for Note {
-    fn get_id(&self) -> i32 {
+    fn from_rows(statement: &mut sqlite::Statement) -> Vec<Self> {
+        let mut res = vec![];
+        while let Ok(State::Row) = statement.next() {
+            res.push(Self {
+                id: statement.read::<i64, _>("id").unwrap(),
+                owner_id: statement.read::<i64, _>("owner_id").unwrap(),
+                contents: statement.read::<String, _>("contents").unwrap(),
+            });
+        }
+        return res;
+    }
+
+    fn table_name() -> String { "notes".to_string() }
+
+    fn sql_cols() -> String { "id,owner_id,contents".to_string() }
+
+    fn id_col() -> String { "id".to_string() }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RequestNote {
+    pub id: Option<i64>,
+    pub owner_id: Option<i64>,
+    pub contents: Option<String>,
+}
+
+impl Bindable for RequestNote {
+    fn bind(self, statement: &mut sqlite::Statement) -> sqlite::Result<()> {
+        let mut idx = 1;
+        if let Some(id) = self.id {
+            id.clone().bind(statement, idx)?;
+            idx += 1;
+        }
+        if let Some(owner_id) = self.owner_id {
+            owner_id.clone().bind(statement, idx)?;
+            idx += 1;
+        }
+        if let Some(contents) = self.contents {
+            contents.clone().as_str().bind(statement, idx)?;
+            idx += 1;
+        }
+        Ok(())
+    }
+}
+
+impl RequestObject for RequestNote {
+    fn validate_create(&self) -> Result<(), ValidationError> {
+        match self.id {
+            Some(_) => Err(ValidationError::MissingIdOnUpdate),
+            None => Ok(()),
+        }
+    }
+
+    fn validate_update(&self) -> Result<(), ValidationError> {
+        match self.id {
+            Some(_) => Ok(()),
+            None => Err(ValidationError::MissingIdOnUpdate),
+        }
+    }
+
+    fn sql_cols(&self) -> String {
+        let mut cols = vec![];
+        if let Some(_) = self.id { cols.push("id"); }
+        if let Some(_) = self.owner_id { cols.push("owner_id"); }
+        if let Some(_) = self.contents { cols.push("contents"); }
+        cols.join(",")
+    }
+
+    fn sql_placeholders(&self) -> String {
+        let mut ct = 0;
+        if let Some(_) = self.id { ct += 1; }
+        if let Some(_) = self.owner_id { ct += 1; }
+        if let Some(_) = self.contents { ct += 1; }
+        vec!["?"; ct].join(",")
+    }
+
+    fn id(&self) -> Option<i64> {
         self.id
-    }
-    fn get_owner_author_id(&self) -> i32 {
-        self.owner_id
-    }
-}
-
-impl DataMeta for Note {
-    fn get_id_col() -> &'static str {
-        "id"
-    }
-    fn get_owner_author_col() -> &'static str {
-        "owner_id"
-    }
-}
-
-impl Storeable<PsqlStore, Note> for Note {
-    async fn get(id: i64, store: &PsqlStore) -> Option<Note> {
-        let note = sqlx::query_as::<_, Note>("select * from notes where id = ($1)")
-            .bind(id)
-            .fetch_one(&store.pool)
-            .await;
-        match note {
-            Ok(note) => Some(note),
-            Err(e) => {
-                error!("{:?}", e);
-                None
-            }
-        }
-    }
-
-    async fn get_queries(queries: &HashMap<String, String>, store: &PsqlStore) -> Vec<Note> {
-        let mut clauses = vec![];
-        let mut values = vec![];
-        for (i, (k, v)) in queries.iter().enumerate() {
-            debug!("{} = ${} ({})", k, i + 1, v);
-            clauses.push(format!("({} = ${})", k, i + 1));
-            values.push(v);
-        }
-        let sql = if clauses.len() == 0 {
-            "select * from notes".to_string()
-        } else {
-            format!("select * from notes where {}", clauses.join(" and "))
-        };
-
-        debug!("{}", sql);
-
-        let mut query = sqlx::query_as::<_, Note>(sql.as_str());
-
-        for v in values.into_iter() {
-            query = query.bind(v);
-        }
-
-        let users = query.fetch_all(&store.pool).await;
-        match users {
-            Ok(users) => users,
-            Err(e) => {
-                error!("{:?}", e);
-                vec![]
-            }
-        }
-    }
-
-    async fn create(&self, store: &PsqlStore) -> StoreResult<Note> {
-        let note = sqlx::query_as::<_, Note>(
-            "insert into notes (owner_id,contents) values ($1,$2) returning *",
-        )
-        .bind(self.owner_id.clone())
-        .bind(self.contents.clone())
-        .fetch_one(&store.pool)
-        .await;
-        match note {
-            Ok(note) => Ok(note),
-            Err(e) => {
-                error!("{:?}", e);
-                Err(StoreError::NotCreated)
-            }
-        }
-    }
-
-    async fn delete(id: i64, store: &PsqlStore) -> StoreResult<Note> {
-        let note = sqlx::query_as::<_, Note>("delete from notes where id = ($1) returning *")
-            .bind(id)
-            .fetch_one(&store.pool)
-            .await;
-        match note {
-            Ok(note) => Ok(note),
-            Err(e) => {
-                error!("{:?}", e);
-                Err(StoreError::NotFound)
-            }
-        }
     }
 }

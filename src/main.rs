@@ -1,22 +1,16 @@
-use sqlx::postgres::PgPoolOptions;
 use std::env;
 use tokio::net::TcpListener;
 use tracing_subscriber::prelude::*;
 
-use authrs::{AuthrState, PsqlStore, auth::google_auth::GoogleAuthClient, run};
+use authrs::{auth::google_auth::GoogleAuthClient, run, AuthrState, SqliteStore};
 use tracing::info;
 
 #[tokio::main]
 async fn main() {
-    let pool = PgPoolOptions::new()
-        .max_connections(5)
-        .connect("postgres://myuser:mypass@localhost/mydb")
-        .await
-        .expect("couldn't connect to the database");
     let client = GoogleAuthClient::from_env();
     // let mem_store = MemStore::new();
-    let psql_store = PsqlStore::new(pool);
-    let state = AuthrState::new(client, psql_store);
+    let store = SqliteStore::new();
+    let state = AuthrState::new(client, store);
 
     if env::var("RUST_LOG").is_err() {
         panic!("RUST_LOG not set!");

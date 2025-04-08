@@ -1,22 +1,45 @@
+pub(crate) mod sqlitestore;
 pub(crate) mod error;
-
-mod psql;
-use std::collections::HashMap;
+pub use sqlitestore::SqliteStore;
 
 use error::StoreResult;
-pub use psql::PsqlStore;
+use sqlite::Value;
 
-use crate::types::DataObject;
+use crate::types::{DataObject, RequestObject};
 
-pub(crate) trait Store: Send {}
+pub(crate) trait Store {
+    fn create<R: RequestObject, T: DataObject>(&self, data: R) -> StoreResult<T>;
+    fn update<R: RequestObject, T: DataObject>(&self, data: R) -> StoreResult<T>;
+    fn get<T: DataObject>(&self, id: i64) -> Option<T>;
+    fn get_queries<T: DataObject>(&self, queries: Vec<impl Query>) -> Vec<T>;
+    fn delete<T: DataObject>(&self, id: i64) -> StoreResult<T>;
+}
 
-pub(crate) trait Storeable<T, DO>
-where
-    T: Store,
-    DO: DataObject,
-{
-    async fn get(id: i64, store: &T) -> Option<DO>;
-    async fn get_queries(queries: &HashMap<String, String>, store: &T) -> Vec<DO>;
-    async fn create(&self, store: &T) -> StoreResult<DO>;
-    async fn delete(id: i64, store: &T) -> StoreResult<DO>;
+pub(crate) trait Query {
+    fn build(&self) -> (String, Value);
+}
+
+pub(crate) struct ContainsQuery {
+    pub field: String,
+    pub val: String,
+}
+
+impl Query for ContainsQuery {
+    fn build(&self) -> (String, Value) {
+        (
+            format!("{} LIKE ?", self.field),
+            Value::String(format!("%{}%", self.val)),
+        )
+    }
+}
+
+pub(crate) struct EqualsQuery {
+    pub field: String,
+    pub val: Value,
+}
+
+impl Query for EqualsQuery {
+    fn build(&self) -> (String, Value) {
+        (format!("{} = ?", self.field), self.val.clone())
+    }
 }
