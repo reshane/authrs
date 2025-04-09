@@ -1,4 +1,4 @@
-use crate::AuthrState;
+use crate::AuthState;
 use axum::{
     Router,
     extract::{Request, State},
@@ -12,13 +12,13 @@ use tracing::{debug, error};
 
 pub mod google_auth;
 
-pub fn routes(state: Arc<AuthrState>) -> Router {
+pub fn routes(state: Arc<AuthState>) -> Router {
     Router::new().nest_service("/google/", google_auth::routes(state))
 }
 
 // auth middleware
 pub async fn request_authorizer(
-    State(state): State<Arc<AuthrState>>,
+    State(state): State<Arc<AuthState>>,
     jar: CookieJar,
     req: Request,
     next: Next,

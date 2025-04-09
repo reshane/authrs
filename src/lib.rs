@@ -9,8 +9,8 @@ pub mod types;
 use crate::auth::google_auth::GoogleAuthClient;
 use crate::error::AuthrError;
 pub use crate::store::SqliteStore;
-use crate::store::{Store, ExtractGlonkQueries};
-use crate::types::{DataType, Note, RequestNote, RequestObject, DataObject, RequestUser, User};
+use crate::store::{ExtractGlonkQueries, Store};
+use crate::types::{DataObject, DataType, Note, RequestNote, RequestObject, RequestUser, User};
 
 // imports
 use axum::http::StatusCode;
@@ -33,19 +33,32 @@ use tracing::{debug, error, info};
 
 // state type
 pub struct AuthrState {
+    auth: Arc<AuthState>,
+    data: Arc<DataState>,
+}
+
+pub struct AuthState {
     oauth_sessions: Mutex<HashMap<String, String>>,
     sessions: Mutex<HashMap<String, (User, time::OffsetDateTime)>>,
     google_client: GoogleAuthClient,
     store: Arc<SqliteStore>,
 }
 
+pub struct DataState {
+    store: Arc<SqliteStore>,
+}
+
 impl AuthrState {
     pub fn new(google_client: GoogleAuthClient, store: SqliteStore) -> Self {
+        let store = Arc::new(store);
         Self {
-            oauth_sessions: Mutex::new(HashMap::<String, String>::new()),
-            sessions: Mutex::new(HashMap::<String, (User, time::OffsetDateTime)>::new()),
-            google_client,
-            store: Arc::new(store),
+            auth: Arc::new(AuthState {
+                oauth_sessions: Mutex::new(HashMap::<String, String>::new()),
+                sessions: Mutex::new(HashMap::<String, (User, time::OffsetDateTime)>::new()),
+                google_client,
+                store: store.clone(),
+            }),
+            data: Arc::new(DataState { store }),
         }
     }
 }
@@ -53,7 +66,7 @@ impl AuthrState {
 async fn data_get_queries(
     Path(data_type): Path<DataType>,
     ExtractGlonkQueries(queries): ExtractGlonkQueries,
-    State(state): State<Arc<AuthrState>>,
+    State(state): State<Arc<DataState>>,
 ) -> impl IntoResponse {
     debug!("{:?}", queries);
     match data_type {
@@ -70,7 +83,7 @@ async fn data_get_queries(
 
 async fn data_get(
     Path((data_type, id)): Path<(DataType, i64)>,
-    State(state): State<Arc<AuthrState>>,
+    State(state): State<Arc<DataState>>,
 ) -> impl IntoResponse {
     match data_type {
         DataType::User => {
@@ -92,7 +105,7 @@ async fn data_get(
 
 async fn data_delete(
     Path((data_type, id)): Path<(DataType, i64)>,
-    State(state): State<Arc<AuthrState>>,
+    State(state): State<Arc<DataState>>,
 ) -> impl IntoResponse {
     match data_type {
         DataType::User => {
@@ -114,7 +127,7 @@ async fn data_delete(
 
 async fn handle_create<R: RequestObject + Clone, T: DataObject + Serialize>(
     payload: R,
-    state: Arc<AuthrState>,
+    state: Arc<DataState>,
 ) -> impl IntoResponse {
     if let Err(e) = payload.validate_create() {
         error!("{:?}", e);
@@ -129,7 +142,7 @@ async fn handle_create<R: RequestObject + Clone, T: DataObject + Serialize>(
 
 async fn data_create(
     Path(data_type): Path<DataType>,
-    State(state): State<Arc<AuthrState>>,
+    State(state): State<Arc<DataState>>,
     body: String,
 ) -> impl IntoResponse {
     match data_type {
@@ -156,7 +169,7 @@ async fn data_create(
 
 async fn handle_update<R: RequestObject + Clone, T: DataObject + Serialize>(
     payload: R,
-    state: Arc<AuthrState>,
+    state: Arc<DataState>,
 ) -> impl IntoResponse {
     if let Err(e) = payload.validate_update() {
         error!("{:?}", e);
@@ -171,7 +184,7 @@ async fn handle_update<R: RequestObject + Clone, T: DataObject + Serialize>(
 
 async fn data_update(
     Path(data_type): Path<DataType>,
-    State(state): State<Arc<AuthrState>>,
+    State(state): State<Arc<DataState>>,
     body: String,
 ) -> impl IntoResponse {
     match data_type {
@@ -201,17 +214,13 @@ async fn handle_not_found() -> impl IntoResponse {
     AuthrError::NotFound.into_response()
 }
 
-fn data_routes(state: Arc<AuthrState>) -> Router {
+fn data_routes(state: Arc<DataState>) -> Router {
     Router::new()
         .route("/{type}/{id}", get(data_get))
         .route("/{type}", get(data_get_queries))
         .route("/{type}/{id}", delete(data_delete))
         .route("/{type}", post(data_create))
         .route("/{type}", put(data_update))
-        .route_layer(middleware::from_fn_with_state(
-            state.clone(),
-            auth::request_authorizer,
-        ))
         .with_state(state)
 }
 
@@ -219,9 +228,13 @@ pub async fn run(listener: TcpListener, state: AuthrState) {
     let state = Arc::new(state);
     let app = Router::new()
         // data routes should only get the store in state
-        .nest_service("/data/", data_routes(state.clone()))
+        .nest_service("/data/", data_routes(state.data.clone()))
+        .route_layer(middleware::from_fn_with_state(
+            state.auth.clone(),
+            auth::request_authorizer,
+        ))
         // auth routes should get the store & the sessions
-        .nest_service("/auth/", auth::routes(state))
+        .nest_service("/auth/", auth::routes(state.auth.clone()))
         .fallback_service(
             ServeDir::new("static").not_found_service(handle_not_found.into_service()),
         );

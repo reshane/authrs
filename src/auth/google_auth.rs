@@ -26,7 +26,7 @@ use oauth2::{
 use std::env;
 
 use crate::{
-    AuthrState, Store,
+    AuthState, Store,
     error::AuthrError,
     types::{QueryTypes, RequestUser, User, UserByGuid, UserQuery},
 };
@@ -105,14 +105,14 @@ impl From<GoogleUserInfo> for RequestUser {
 }
 
 // routes
-pub fn routes(state: Arc<AuthrState>) -> Router {
+pub fn routes(state: Arc<AuthState>) -> Router {
     Router::new()
         .route("/login", get(login))
         .route("/callback", get(callback))
         .with_state(state)
 }
 
-pub async fn login(State(state): State<Arc<AuthrState>>) -> impl IntoResponse {
+pub async fn login(State(state): State<Arc<AuthState>>) -> impl IntoResponse {
     // Generate a PKCE challenge.
     let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
 
@@ -143,7 +143,7 @@ pub async fn login(State(state): State<Arc<AuthrState>>) -> impl IntoResponse {
 
 pub async fn callback(
     Query(params): Query<HashMap<String, String>>,
-    State(state): State<Arc<AuthrState>>,
+    State(state): State<Arc<AuthState>>,
 ) -> impl IntoResponse {
     let csrf_token_header = params.get("state");
     let token = match csrf_token_header {
@@ -179,18 +179,19 @@ pub async fn callback(
     // Once the user has been redirected to the redirect URL, you'll have access to the
     // authorization code. For security reasons, your code should verify that the `state`
     // parameter returned by the server matches `csrf_token`.
-    let user_info = match get_google_user_info(pkce_verifier, code, state.google_client.client.clone()).await {
-        Ok(u) => u,
-        Err(_) => {
-            return AuthrError::NotAuthorized.into_response();
-        },
-    };
+    let user_info =
+        match get_google_user_info(pkce_verifier, code, state.google_client.client.clone()).await {
+            Ok(u) => u,
+            Err(_) => {
+                return AuthrError::NotAuthorized.into_response();
+            }
+        };
 
     let retrieved = match retrieve_or_create_user(user_info, state.clone()).await {
         Some(r) => r,
         None => {
             return AuthrError::NotAuthorized.into_response();
-        },
+        }
     };
 
     debug!("{:?}", retrieved);
@@ -204,10 +205,7 @@ pub async fn callback(
             let expires = now.checked_add(cookie_exp_duration);
             match expires {
                 Some(expires) => {
-                    sessions.insert(
-                        pkce_verifier.secret().clone(),
-                        (retrieved, expires),
-                    );
+                    sessions.insert(pkce_verifier.secret().clone(), (retrieved, expires));
                 }
                 None => {
                     error!("Could not add {:?} and {:?}", now, cookie_exp_duration);
@@ -235,7 +233,11 @@ pub async fn callback(
         .into_response()
 }
 
-async fn get_google_user_info(pkce_verifier: String, code: String, client: SetClient) -> Result<GoogleUserInfo, ()> {
+async fn get_google_user_info(
+    pkce_verifier: String,
+    code: String,
+    client: SetClient,
+) -> Result<GoogleUserInfo, ()> {
     let http_client = reqwest::ClientBuilder::new()
         // Following redirects opens the client up to SSRF vulnerabilities.
         .redirect(reqwest::redirect::Policy::none())
@@ -284,7 +286,7 @@ async fn get_google_user_info(pkce_verifier: String, code: String, client: SetCl
     }
 }
 
-async fn retrieve_or_create_user(user_info: GoogleUserInfo, state: Arc<AuthrState>) -> Option<User> {
+async fn retrieve_or_create_user(user_info: GoogleUserInfo, state: Arc<AuthState>) -> Option<User> {
     let user = RequestUser::from(user_info);
     let mut retrieved: Vec<User> =
         state
@@ -314,4 +316,3 @@ async fn retrieve_or_create_user(user_info: GoogleUserInfo, state: Arc<AuthrStat
         }
     }
 }
-
