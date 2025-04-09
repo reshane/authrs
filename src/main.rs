@@ -2,7 +2,7 @@ use std::env;
 use tokio::net::TcpListener;
 use tracing_subscriber::prelude::*;
 
-use authrs::{auth::google_auth::GoogleAuthClient, run, AuthrState, SqliteStore};
+use authrs::{AuthrState, SqliteStore, auth::google_auth::GoogleAuthClient, run};
 use tracing::info;
 
 #[tokio::main]

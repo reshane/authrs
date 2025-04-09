@@ -1,23 +1,19 @@
-use std::fmt;
-
 use serde::Deserialize;
+use std::fmt;
 
 mod user;
 use sqlite::{Bindable, Statement};
-pub use user::{User, RequestUser};
+pub use user::{RequestUser, User, UserByGuid, UserQuery};
 mod note;
-pub use note::{Note, RequestNote};
+pub use note::{Note, NoteQuery, RequestNote};
+
+use crate::store::Query;
 
 pub trait DataObject: Sized + Bindable + std::fmt::Debug + Clone {
     fn from_rows(statement: &mut Statement) -> Vec<Self>;
     fn table_name() -> String;
     fn sql_cols() -> String;
     fn id_col() -> String;
-}
-
-pub trait DataVisitor {
-    fn visit_user(&self, u: &User);
-    fn visit_note(&self, n: &Note);
 }
 
 #[derive(Debug, Deserialize)]
@@ -48,13 +44,13 @@ impl fmt::Display for ValidationError {
         match *self {
             ValidationError::MissingIdOnUpdate => {
                 write!(fmt, "id required for updates")
-            },
+            }
             ValidationError::MissingRequiredOnCreate(ref s) => {
                 write!(fmt, "missing required field `{}`", s)
-            },
+            }
             ValidationError::IdProvidedOnCreate => {
                 write!(fmt, "id must not be provided for create")
-            },
+            }
         }
     }
 }
@@ -73,6 +69,38 @@ impl std::error::Error for ValidationError {
             ValidationError::MissingIdOnUpdate => None,
             ValidationError::MissingRequiredOnCreate(_) => None,
             ValidationError::IdProvidedOnCreate => None,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) enum QueryTypes {
+    UserQuery(UserQuery),
+    NoteQuery(NoteQuery),
+}
+
+impl Query for QueryTypes {
+    fn build(&self) -> (String, Vec<sqlite::Value>) {
+        match self {
+            Self::UserQuery(inner) => inner.build(),
+            Self::NoteQuery(inner) => inner.build(),
+        }
+    }
+}
+
+impl TryFrom<(&DataType, (&String, &String))> for QueryTypes {
+    type Error = ();
+
+    fn try_from((dt, (query, val)): (&DataType, (&String, &String))) -> Result<Self, Self::Error> {
+        match dt {
+            DataType::User => {
+                let uq = UserQuery::try_from((query, val))?;
+                Ok(QueryTypes::UserQuery(uq))
+            }
+            DataType::Note => {
+                let nq = NoteQuery::try_from((query, val))?;
+                Ok(QueryTypes::NoteQuery(nq))
+            }
         }
     }
 }

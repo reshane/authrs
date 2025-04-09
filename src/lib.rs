@@ -8,14 +8,12 @@ pub mod types;
 // internal imports
 use crate::auth::google_auth::GoogleAuthClient;
 use crate::error::AuthrError;
-use crate::store::{Store, Query};
 pub use crate::store::SqliteStore;
-use crate::types::{DataType, Note, RequestNote, RequestObject, User, RequestUser};
+use crate::store::Store;
+use crate::types::{DataType, Note, RequestNote, RequestObject, RequestUser, User};
 
 // imports
 use axum::http::StatusCode;
-use axum::extract::Query as UrlQuery;
-use axum::middleware;
 use axum::{
     Json, Router,
     extract::{Path, State},
@@ -23,12 +21,17 @@ use axum::{
     response::IntoResponse,
     routing::{delete, get, post, put},
 };
+use axum::{debug_handler, middleware};
 use serde::Serialize;
-use types::DataObject;
-use std::{collections::HashMap, sync::{Arc, Mutex}};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
+use store::ExtractGlonkQueries;
 use tokio::net::TcpListener;
 use tower_http::services::ServeDir;
-use tracing::{error, info};
+use tracing::{debug, error, info};
+use types::DataObject;
 
 // state type
 pub struct AuthrState {
@@ -49,16 +52,12 @@ impl AuthrState {
     }
 }
 
-fn parse_params(_params: &HashMap<String, String>) -> Vec<Box<dyn Query>> {
-    vec![]
-}
-
 async fn data_get_queries(
     Path(data_type): Path<DataType>,
-    UrlQuery(params): UrlQuery<HashMap<String, String>>,
+    ExtractGlonkQueries(queries): ExtractGlonkQueries,
     State(state): State<Arc<AuthrState>>,
 ) -> impl IntoResponse {
-    let queries = parse_params(&params);
+    debug!("{:?}", queries);
     match data_type {
         DataType::User => {
             let data = state.store.clone().get_queries::<User>(queries);
@@ -115,7 +114,7 @@ async fn data_delete(
     }
 }
 
-async fn handle_create<R: RequestObject + Clone, T: DataObject + Serialize> (
+async fn handle_create<R: RequestObject + Clone, T: DataObject + Serialize>(
     payload: R,
     state: Arc<AuthrState>,
 ) -> impl IntoResponse {
@@ -137,14 +136,18 @@ async fn data_create(
 ) -> impl IntoResponse {
     match data_type {
         DataType::User => match serde_json::from_str::<RequestUser>(body.as_str()) {
-            Ok(payload) => handle_create::<_, User>(payload, state).await.into_response(),
+            Ok(payload) => handle_create::<_, User>(payload, state)
+                .await
+                .into_response(),
             Err(e) => {
                 error!("{:?}", e);
                 return (StatusCode::BAD_REQUEST, "Bad Request").into_response();
             }
         },
         DataType::Note => match serde_json::from_str::<RequestNote>(body.as_str()) {
-            Ok(payload) => handle_create::<_, Note>(payload, state).await.into_response(),
+            Ok(payload) => handle_create::<_, Note>(payload, state)
+                .await
+                .into_response(),
             Err(e) => {
                 error!("{:?}", e);
                 return (StatusCode::BAD_REQUEST, "Bad Request").into_response();
@@ -153,7 +156,7 @@ async fn data_create(
     }
 }
 
-async fn handle_update<R: RequestObject + Clone, T: DataObject + Serialize> (
+async fn handle_update<R: RequestObject + Clone, T: DataObject + Serialize>(
     payload: R,
     state: Arc<AuthrState>,
 ) -> impl IntoResponse {
@@ -175,14 +178,18 @@ async fn data_update(
 ) -> impl IntoResponse {
     match data_type {
         DataType::User => match serde_json::from_str::<RequestUser>(body.as_str()) {
-            Ok(payload) => handle_update::<_, User>(payload, state).await.into_response(),
+            Ok(payload) => handle_update::<_, User>(payload, state)
+                .await
+                .into_response(),
             Err(e) => {
                 error!("{:?}", e);
                 return (StatusCode::BAD_REQUEST, "Bad Request").into_response();
             }
         },
         DataType::Note => match serde_json::from_str::<RequestNote>(body.as_str()) {
-            Ok(payload) => handle_update::<_, Note>(payload, state).await.into_response(),
+            Ok(payload) => handle_update::<_, Note>(payload, state)
+                .await
+                .into_response(),
             Err(e) => {
                 error!("{:?}", e);
                 return (StatusCode::BAD_REQUEST, "Bad Request").into_response();

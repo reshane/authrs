@@ -1,4 +1,3 @@
-
 fn main() {
     let connection = sqlite::open("test.db").unwrap();
     let query = "

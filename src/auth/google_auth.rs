@@ -25,7 +25,11 @@ use oauth2::{
 };
 use std::env;
 
-use crate::{error::AuthrError, store::EqualsQuery, types::{RequestUser, User}, AuthrState, Store};
+use crate::{
+    AuthrState, Store,
+    error::AuthrError,
+    types::{QueryTypes, RequestUser, User, UserByGuid, UserQuery},
+};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info};
 
@@ -214,9 +218,13 @@ pub async fn callback(
     };
 
     let user = RequestUser::from(user_info);
-    let mut retrieved: Vec<User> = state.store.clone().get_queries::<User>(
-        vec![Box::new(EqualsQuery{ field: "guid".to_string(), val: sqlite::Value::String(user.guid.clone().unwrap()) })]
-    );
+    let mut retrieved: Vec<User> =
+        state
+            .store
+            .clone()
+            .get_queries::<User>(vec![QueryTypes::UserQuery(UserQuery::ByGuid(
+                UserByGuid::new(user.guid.clone().unwrap()),
+            ))]);
     let retrieved = match retrieved.len() {
         1 => retrieved.pop(),
         0 => {
@@ -248,7 +256,10 @@ pub async fn callback(
             let expires = now.checked_add(cookie_exp_duration);
             match expires {
                 Some(expires) => {
-                    sessions.insert(pkce_verifier.secret().clone(), (retrieved.clone().unwrap(), expires));
+                    sessions.insert(
+                        pkce_verifier.secret().clone(),
+                        (retrieved.clone().unwrap(), expires),
+                    );
                 }
                 None => {
                     error!("Could not add {:?} and {:?}", now, cookie_exp_duration);

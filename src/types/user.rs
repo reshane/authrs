@@ -1,4 +1,6 @@
-use super::{DataObject, RequestObject, ValidationError};
+use crate::store::{EqualsCriteria, Query};
+
+use super::{DataObject, NewDataObject, RequestObject, ValidationError};
 use serde::{Deserialize, Serialize};
 use sqlite::{Bindable, BindableWithIndex, State, Statement};
 
@@ -88,24 +90,42 @@ impl Bindable for RequestUser {
 impl RequestObject for RequestUser {
     fn validate_create(&self) -> Result<(), ValidationError> {
         match self.guid {
-            Some(_) => {},
-            None => { return Err(ValidationError::MissingRequiredOnCreate(String::from("guid"))); },
+            Some(_) => {}
+            None => {
+                return Err(ValidationError::MissingRequiredOnCreate(String::from(
+                    "guid",
+                )));
+            }
         }
         match self.name {
-            Some(_) => {},
-            None => { return Err(ValidationError::MissingRequiredOnCreate(String::from("name"))); },
+            Some(_) => {}
+            None => {
+                return Err(ValidationError::MissingRequiredOnCreate(String::from(
+                    "name",
+                )));
+            }
         }
         match self.email {
-            Some(_) => {},
-            None => { return Err(ValidationError::MissingRequiredOnCreate(String::from("email"))); },
+            Some(_) => {}
+            None => {
+                return Err(ValidationError::MissingRequiredOnCreate(String::from(
+                    "email",
+                )));
+            }
         }
         match self.picture {
-            Some(_) => {},
-            None => { return Err(ValidationError::MissingRequiredOnCreate(String::from("picture"))); },
+            Some(_) => {}
+            None => {
+                return Err(ValidationError::MissingRequiredOnCreate(String::from(
+                    "picture",
+                )));
+            }
         }
         match self.id {
-            Some(_) => { return Err(ValidationError::IdProvidedOnCreate); },
-            None => {},
+            Some(_) => {
+                return Err(ValidationError::IdProvidedOnCreate);
+            }
+            None => {}
         }
         Ok(())
     }
@@ -119,25 +139,94 @@ impl RequestObject for RequestUser {
 
     fn sql_cols(&self) -> String {
         let mut cols = vec![];
-        if let Some(_) = self.id { cols.push("id"); }
-        if let Some(_) = self.guid { cols.push("guid"); }
-        if let Some(_) = self.name { cols.push("name"); }
-        if let Some(_) = self.email { cols.push("email"); }
-        if let Some(_) = self.picture { cols.push("picture"); }
+        if let Some(_) = self.id {
+            cols.push("id");
+        }
+        if let Some(_) = self.guid {
+            cols.push("guid");
+        }
+        if let Some(_) = self.name {
+            cols.push("name");
+        }
+        if let Some(_) = self.email {
+            cols.push("email");
+        }
+        if let Some(_) = self.picture {
+            cols.push("picture");
+        }
         cols.join(",")
     }
 
     fn sql_placeholders(&self) -> String {
         let mut ct = 0;
-        if let Some(_) = self.id { ct += 1; }
-        if let Some(_) = self.guid { ct += 1; }
-        if let Some(_) = self.name { ct += 1; }
-        if let Some(_) = self.email {ct += 1; }
-        if let Some(_) = self.picture { ct += 1; }
+        if let Some(_) = self.id {
+            ct += 1;
+        }
+        if let Some(_) = self.guid {
+            ct += 1;
+        }
+        if let Some(_) = self.name {
+            ct += 1;
+        }
+        if let Some(_) = self.email {
+            ct += 1;
+        }
+        if let Some(_) = self.picture {
+            ct += 1;
+        }
         vec!["?"; ct].join(",")
     }
 
     fn id(&self) -> Option<i64> {
         self.id
+    }
+}
+
+// Query types
+#[derive(Debug)]
+pub enum UserQuery {
+    ByGuid(UserByGuid),
+}
+
+impl Query for UserQuery {
+    fn build(&self) -> (String, Vec<sqlite::Value>) {
+        match self {
+            UserQuery::ByGuid(inner) => inner.build(),
+        }
+    }
+}
+
+impl TryFrom<(&String, &String)> for UserQuery {
+    type Error = ();
+
+    fn try_from((q, v): (&String, &String)) -> Result<Self, Self::Error> {
+        let q = q.as_str();
+        match q {
+            "byGuid" => Ok(Self::ByGuid(UserByGuid::new(v.to_string()))),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct UserByGuid {
+    inner: EqualsCriteria,
+}
+
+impl UserByGuid {
+    pub fn new(val: String) -> Self {
+        Self {
+            inner: EqualsCriteria {
+                field: String::from("guid"),
+                val: sqlite::Value::String(val),
+            },
+        }
+    }
+}
+
+impl Query for UserByGuid {
+    fn build(&self) -> (String, Vec<sqlite::Value>) {
+        use crate::store::Criteria;
+        self.inner.build()
     }
 }

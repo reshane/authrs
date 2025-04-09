@@ -1,3 +1,5 @@
+use crate::store::{ContainsCriteria, Query};
+
 use super::{DataObject, RequestObject, ValidationError};
 use serde::{Deserialize, Serialize};
 use sqlite::{Bindable, BindableWithIndex, State};
@@ -31,11 +33,17 @@ impl DataObject for Note {
         return res;
     }
 
-    fn table_name() -> String { "notes".to_string() }
+    fn table_name() -> String {
+        "notes".to_string()
+    }
 
-    fn sql_cols() -> String { "id,owner_id,contents".to_string() }
+    fn sql_cols() -> String {
+        "id,owner_id,contents".to_string()
+    }
 
-    fn id_col() -> String { "id".to_string() }
+    fn id_col() -> String {
+        "id".to_string()
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -66,16 +74,26 @@ impl Bindable for RequestNote {
 impl RequestObject for RequestNote {
     fn validate_create(&self) -> Result<(), ValidationError> {
         match self.owner_id {
-            Some(_) => {},
-            None => { return Err(ValidationError::MissingRequiredOnCreate(String::from("owner_id"))); },
+            Some(_) => {}
+            None => {
+                return Err(ValidationError::MissingRequiredOnCreate(String::from(
+                    "owner_id",
+                )));
+            }
         }
         match self.contents {
-            Some(_) => {},
-            None => { return Err(ValidationError::MissingRequiredOnCreate(String::from("contents"))); },
+            Some(_) => {}
+            None => {
+                return Err(ValidationError::MissingRequiredOnCreate(String::from(
+                    "contents",
+                )));
+            }
         }
         match self.id {
-            Some(_) => { return Err(ValidationError::IdProvidedOnCreate); },
-            None => {},
+            Some(_) => {
+                return Err(ValidationError::IdProvidedOnCreate);
+            }
+            None => {}
         }
         Ok(())
     }
@@ -89,21 +107,84 @@ impl RequestObject for RequestNote {
 
     fn sql_cols(&self) -> String {
         let mut cols = vec![];
-        if let Some(_) = self.id { cols.push("id"); }
-        if let Some(_) = self.owner_id { cols.push("owner_id"); }
-        if let Some(_) = self.contents { cols.push("contents"); }
+        if let Some(_) = self.id {
+            cols.push("id");
+        }
+        if let Some(_) = self.owner_id {
+            cols.push("owner_id");
+        }
+        if let Some(_) = self.contents {
+            cols.push("contents");
+        }
         cols.join(",")
     }
 
     fn sql_placeholders(&self) -> String {
         let mut ct = 0;
-        if let Some(_) = self.id { ct += 1; }
-        if let Some(_) = self.owner_id { ct += 1; }
-        if let Some(_) = self.contents { ct += 1; }
+        if let Some(_) = self.id {
+            ct += 1;
+        }
+        if let Some(_) = self.owner_id {
+            ct += 1;
+        }
+        if let Some(_) = self.contents {
+            ct += 1;
+        }
         vec!["?"; ct].join(",")
     }
 
     fn id(&self) -> Option<i64> {
         self.id
+    }
+}
+
+// Query types
+#[derive(Debug)]
+pub enum NoteQuery {
+    ByContentsContains(NoteContentsContains),
+}
+
+impl Query for NoteQuery {
+    fn build(&self) -> (String, Vec<sqlite::Value>) {
+        match self {
+            NoteQuery::ByContentsContains(inner) => inner.build(),
+        }
+    }
+}
+
+impl TryFrom<(&String, &String)> for NoteQuery {
+    type Error = ();
+
+    fn try_from((q, v): (&String, &String)) -> Result<Self, Self::Error> {
+        let q = q.as_str();
+        match q {
+            "byContentsContains" => Ok(Self::ByContentsContains(NoteContentsContains::new(
+                v.to_string(),
+            ))),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct NoteContentsContains {
+    inner: ContainsCriteria,
+}
+
+impl NoteContentsContains {
+    pub fn new(val: String) -> Self {
+        Self {
+            inner: ContainsCriteria {
+                field: String::from("contents"),
+                val,
+            },
+        }
+    }
+}
+
+impl Query for NoteContentsContains {
+    fn build(&self) -> (String, Vec<sqlite::Value>) {
+        use crate::store::Criteria;
+        self.inner.build()
     }
 }

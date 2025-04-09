@@ -1,10 +1,10 @@
-use std::sync::Mutex;
 use sqlite::{Connection, Value};
+use std::sync::Mutex;
 use tracing::debug;
 
-use crate::{types::DataObject, RequestObject};
+use crate::{RequestObject, types::DataObject};
 
-use super::{error::StoreResult, Query, Store};
+use super::{Query, QueryTypes, Store, error::StoreResult};
 
 pub struct SqliteStore {
     conn: Mutex<Connection>,
@@ -13,7 +13,9 @@ pub struct SqliteStore {
 impl SqliteStore {
     pub fn new() -> Self {
         let connection = sqlite::open("test.db").unwrap();
-        Self { conn: Mutex::new(connection) }
+        Self {
+            conn: Mutex::new(connection),
+        }
     }
 }
 
@@ -47,7 +49,7 @@ impl Store for SqliteStore {
             None => {
                 println!("No id on request onject");
                 return Err(crate::store::error::StoreError::NotCreated);
-            },
+            }
         };
         let query = format!(
             "UPDATE {} SET ({}) = ({}) where {} = :id returning {}",
@@ -88,13 +90,17 @@ impl Store for SqliteStore {
         }
     }
 
-    fn get_queries<T: DataObject>(&self, queries: Vec<Box<dyn Query>>) -> Vec<T> {
+    fn get_queries<T: DataObject>(&self, queries: Vec<QueryTypes>) -> Vec<T> {
         let mut clauses = vec![];
         let mut bindables = vec![];
-        for (i, q) in queries.iter().enumerate() {
-            let (clause, val) = q.build();
+        let mut i = 0;
+        for q in queries.iter() {
+            let (clause, vals) = q.build();
             clauses.push(clause);
-            bindables.push((i + 1, val));
+            vals.into_iter().for_each(|v| {
+                bindables.push((i + 1, v));
+                i += 1;
+            });
         }
         let mut query = format!("SELECT * FROM {}", T::table_name());
         if clauses.len() > 0 {
