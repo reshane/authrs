@@ -9,8 +9,8 @@ pub mod types;
 use crate::auth::google_auth::GoogleAuthClient;
 use crate::error::AuthrError;
 pub use crate::store::SqliteStore;
-use crate::store::Store;
-use crate::types::{DataType, Note, RequestNote, RequestObject, RequestUser, User};
+use crate::store::{Store, ExtractGlonkQueries};
+use crate::types::{DataType, Note, RequestNote, RequestObject, DataObject, RequestUser, User};
 
 // imports
 use axum::http::StatusCode;
@@ -27,11 +27,9 @@ use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
 };
-use store::ExtractGlonkQueries;
 use tokio::net::TcpListener;
 use tower_http::services::ServeDir;
 use tracing::{debug, error, info};
-use types::DataObject;
 
 // state type
 pub struct AuthrState {

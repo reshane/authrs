@@ -1,6 +1,6 @@
 use crate::store::{EqualsCriteria, Query};
 
-use super::{DataObject, NewDataObject, RequestObject, ValidationError};
+use super::{DataObject, RequestObject, ValidationError};
 use serde::{Deserialize, Serialize};
 use sqlite::{Bindable, BindableWithIndex, State, Statement};
 
